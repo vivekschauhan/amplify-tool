@@ -1,0 +1,11 @@
+# IDE project directories
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+
+# Build artifacts
+bin/
+__debug_bin
+debug
+*.log
