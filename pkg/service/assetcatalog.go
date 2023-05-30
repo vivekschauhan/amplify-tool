@@ -20,13 +20,15 @@ type assetCatalog struct {
 	logger     *logrus.Logger
 	apicClient apic.Client
 	Assets     map[string]AssetInfo
+	dryRun     bool
 }
 
-func NewAssetCatalog(logger *logrus.Logger, apicClient apic.Client) AssetCatalog {
+func NewAssetCatalog(logger *logrus.Logger, apicClient apic.Client, dryRun bool) AssetCatalog {
 	return &assetCatalog{
 		logger:     logger,
 		apicClient: apicClient,
 		Assets:     make(map[string]AssetInfo),
+		dryRun:     dryRun,
 	}
 }
 
@@ -168,9 +170,11 @@ func (t *assetCatalog) deleteAssetResources(logger *logrus.Entry, asset AssetInf
 			WithField("assetResourceID", assetResource.AssetResource.Metadata.ID).
 			WithField("assetResourceName", assetResource.AssetResource.Name)
 		logger.Info("Removing AssetResource with deleted service reference")
-		err := t.apicClient.DeleteResourceInstance(assetResource.AssetResource)
-		if err != nil {
-			logger.WithError(err).Error("Unable to delete the corrupted asset resource")
+		if !t.dryRun {
+			err := t.apicClient.DeleteResourceInstance(assetResource.AssetResource)
+			if err != nil {
+				logger.WithError(err).Error("Unable to delete the corrupted asset resource")
+			}
 		}
 	}
 }
@@ -184,10 +188,14 @@ func (t *assetCatalog) recreateAssetMapping(logger *logrus.Entry, asset AssetInf
 			am := catalog.NewAssetMapping("", asset.Asset.Name)
 			am.Spec.Inputs.ApiService = assetDeletedRef.Group + "/" + assetDeletedRef.ScopeName + "/" + assetDeletedRef.Name
 			am.Spec.Inputs.Stage = "default"
-			ri, err := t.apicClient.CreateResourceInstance(am)
-			if err != nil {
-				logger.WithError(err).Error("unable to create new asset mapping")
-			} else {
+			ri, err := am.AsInstance()
+			if !t.dryRun {
+				ri, err = t.apicClient.CreateResourceInstance(am)
+				if err != nil {
+					logger.WithError(err).Error("unable to create new asset mapping")
+				}
+			}
+			if err == nil {
 				logger = logger.
 					WithField("newAssetMappingID", ri.Metadata.ID).
 					WithField("newAssetMappingName", ri.Name)
@@ -199,10 +207,12 @@ func (t *assetCatalog) recreateAssetMapping(logger *logrus.Entry, asset AssetInf
 
 func (t *assetCatalog) setAssetToDraft(logger *logrus.Entry, asset AssetInfo) error {
 	logger.Info("Setting asset to draft")
-	statusErr := t.apicClient.CreateSubResource(asset.Asset.ResourceMeta, map[string]interface{}{"state": catalog.AssetStateDRAFT})
-	if statusErr != nil {
-		logger.WithError(statusErr).Error("unable to transition asset to draft")
-		return statusErr
+	if !t.dryRun {
+		statusErr := t.apicClient.CreateSubResource(asset.Asset.ResourceMeta, map[string]interface{}{"state": catalog.AssetStateDRAFT})
+		if statusErr != nil {
+			logger.WithError(statusErr).Error("unable to transition asset to draft")
+			return statusErr
+		}
 	}
 	return nil
 }
@@ -212,10 +222,14 @@ func (t *assetCatalog) createAssetRelease(logger *logrus.Entry, asset AssetInfo)
 	releaseTag, _ := catalog.NewReleaseTag("", catalog.AssetGVK().Kind, asset.Asset.Name)
 	releaseTag.Spec.ReleaseType = "patch"
 	releaseTag.Title = asset.Asset.Title
-	ri, err := t.apicClient.CreateResourceInstance(releaseTag)
-	if err != nil {
-		logger.Errorf("unable to create new release tag asset:%s", asset.Asset.Name)
-	} else {
+	ri, err := releaseTag.AsInstance()
+	if !t.dryRun {
+		ri, err = t.apicClient.CreateResourceInstance(releaseTag)
+		if err != nil {
+			logger.Errorf("unable to create new release tag asset:%s", asset.Asset.Name)
+		}
+	}
+	if err == nil {
 		logger = logger.
 			WithField("newReleaseTagID", ri.Metadata.ID).
 			WithField("newReleaseTagName", ri.Name)
@@ -234,19 +248,23 @@ func (t *assetCatalog) deprecateAndArchivePreviousAssetRelease(logger *logrus.En
 		case string(catalog.AssetStateACTIVE):
 			// deprecate the asset release
 			logger.Info("Deprecating AssetRelease")
-			statusErr := t.apicClient.CreateSubResource(releaseTag.ResourceMeta, map[string]interface{}{"state": catalog.ProductStateDEPRECATED})
-			if statusErr != nil {
-				logger.WithError(statusErr).Error("error deprecating AssetRelease")
-				break
+			if !t.dryRun {
+				statusErr := t.apicClient.CreateSubResource(releaseTag.ResourceMeta, map[string]interface{}{"state": catalog.ProductStateDEPRECATED})
+				if statusErr != nil {
+					logger.WithError(statusErr).Error("error deprecating AssetRelease")
+					break
+				}
 			}
 			fallthrough
 		case string(catalog.AssetStateDEPRECATED):
 			// archive the asset release
 			logger.Info("Archiving AssetRelease")
-			statusErr := t.apicClient.CreateSubResource(releaseTag.ResourceMeta, map[string]interface{}{"state": catalog.ProductStateARCHIVED})
-			if statusErr != nil {
-				logger.WithError(statusErr).Error("error archiving AssetRelease")
-				break
+			if !t.dryRun {
+				statusErr := t.apicClient.CreateSubResource(releaseTag.ResourceMeta, map[string]interface{}{"state": catalog.ProductStateARCHIVED})
+				if statusErr != nil {
+					logger.WithError(statusErr).Error("error archiving AssetRelease")
+					break
+				}
 			}
 		}
 	}

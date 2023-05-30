@@ -34,9 +34,9 @@ func NewTool(cfg *Config) Tool {
 		logger:          logger,
 		cfg:             cfg,
 		apicClient:      apicClient,
-		serviceRegistry: service.NewServiceRegistry(logger, apicClient),
-		assetCatalog:    service.NewAssetCatalog(logger, apicClient),
-		productCatalog:  service.NewProductCatalog(logger, apicClient),
+		serviceRegistry: service.NewServiceRegistry(logger, apicClient, cfg.DryRun),
+		assetCatalog:    service.NewAssetCatalog(logger, apicClient, cfg.DryRun),
+		productCatalog:  service.NewProductCatalog(logger, apicClient, cfg.DryRun),
 	}
 }
 

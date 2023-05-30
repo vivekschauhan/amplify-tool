@@ -43,6 +43,7 @@ func initRepairCmdFlags(cmd *cobra.Command) {
 
 	cmd.Flags().String("log_level", "info", "log level")
 	cmd.Flags().String("log_format", "json", "line or json")
+	cmd.Flags().Bool("dry_run", false, "Run the tool with no update(true/false)")
 }
 
 func runRepairAsset(_ *cobra.Command, _ []string) error {

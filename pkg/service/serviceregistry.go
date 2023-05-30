@@ -16,13 +16,15 @@ type serviceRegistry struct {
 	logger      *logrus.Logger
 	apicClient  apic.Client
 	APIServices map[string]APIServiceInfo
+	dryRun      bool
 }
 
-func NewServiceRegistry(logger *logrus.Logger, apicClient apic.Client) ServiceRegistry {
+func NewServiceRegistry(logger *logrus.Logger, apicClient apic.Client, dryRun bool) ServiceRegistry {
 	return &serviceRegistry{
 		logger:      logger,
 		apicClient:  apicClient,
 		APIServices: make(map[string]APIServiceInfo),
+		dryRun:      dryRun,
 	}
 }
 
