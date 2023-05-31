@@ -10,6 +10,7 @@ import (
 
 type ServiceRegistry interface {
 	ReadServices()
+	GetAPIService(env, name string) *management.APIService
 }
 
 type serviceRegistry struct {
@@ -58,8 +59,20 @@ func (t *serviceRegistry) readAPIServices(logger *logrus.Entry, envName string) 
 			APIService: svc,
 			// APIServiceRevisions: revisions,
 		}
-		t.APIServices[svc.GetMetadata().ID] = serviceInfo
+		t.APIServices[serviceKey(svc.Metadata.Scope.Name, svc.Name)] = serviceInfo
 	}
+}
+
+func serviceKey(env, name string) string {
+	return fmt.Sprintf("%s/%s", env, name)
+}
+
+func (t *serviceRegistry) GetAPIService(env, name string) *management.APIService {
+	apiServiceInfo, ok := t.APIServices[serviceKey(env, name)]
+	if ok {
+		return apiServiceInfo.APIService
+	}
+	return nil
 }
 
 func (t *serviceRegistry) readAPIServiceRevisions(logger *logrus.Entry, svcID, envName string) map[string]APIServiceRevisionInfo {

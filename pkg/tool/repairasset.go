@@ -29,14 +29,16 @@ func NewTool(cfg *Config) Tool {
 	utillog.GlobalLoggerConfig.Level(cfg.Level).
 		Format(cfg.Format).
 		Apply()
-
+	serviceRegistry := service.NewServiceRegistry(logger, apicClient, cfg.DryRun)
+	assetCatalog := service.NewAssetCatalog(logger, serviceRegistry, apicClient, cfg.DryRun)
+	productCatalog := service.NewProductCatalog(logger, apicClient, cfg.DryRun)
 	return &tool{
 		logger:          logger,
 		cfg:             cfg,
 		apicClient:      apicClient,
-		serviceRegistry: service.NewServiceRegistry(logger, apicClient, cfg.DryRun),
-		assetCatalog:    service.NewAssetCatalog(logger, apicClient, cfg.DryRun),
-		productCatalog:  service.NewProductCatalog(logger, apicClient, cfg.DryRun),
+		serviceRegistry: serviceRegistry,
+		assetCatalog:    assetCatalog,
+		productCatalog:  productCatalog,
 	}
 }
 
@@ -63,6 +65,7 @@ func (t *tool) Run() error {
 	t.logger.Info("Amplify Asset Tool")
 	err := t.Read()
 	if err != nil {
+		t.logger.WithError(err).Error("stopping the repair")
 		return err
 	}
 	t.productCatalog.PreProcessProductForAssetRepair()
@@ -73,7 +76,10 @@ func (t *tool) Run() error {
 
 func (t *tool) Read() error {
 	t.serviceRegistry.ReadServices()
-	t.assetCatalog.ReadAssets()
+	err := t.assetCatalog.ReadAssets()
+	if err != nil {
+		return err
+	}
 	t.productCatalog.ReadProducts()
 	return nil
 }

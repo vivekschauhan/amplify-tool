@@ -352,9 +352,13 @@ func (t *productCatalog) setProductStateToDraft(logger *logrus.Entry, product Pr
 
 func (t *productCatalog) setProductReleaseTypeToManual(logger *logrus.Entry, product ProductInfo) {
 	logger.Info("Updating product release type to manual")
-	ri, _ := t.apicClient.GetResource(product.Product.GetSelfLink())
-	p := catalog.NewProduct("")
-	p.FromInstance(ri)
+	p := catalog.NewProduct(product.Product.Name)
+	p.Title = product.Product.Title
+	p.Owner = product.Product.Owner
+	p.Tags = product.Product.Tags
+	p.Attributes = product.Product.Attributes
+	p.Finalizers = product.Product.Finalizers
+	p.Spec = product.Product.Spec
 	p.Spec.AutoRelease = nil
 	if !t.dryRun {
 		_, err := t.apicClient.UpdateResourceInstance(p)
@@ -396,7 +400,7 @@ func (t *productCatalog) createReleaseTag(logger *logrus.Entry, product ProductI
 
 	releaseTagRI, err := t.apicClient.CreateResourceInstance(releaseTag)
 	if err != nil {
-		logger.Errorf("unable to create new release tag for product:%s", product.Product.Name)
+		logger.WithError(err).Errorf("unable to create new release tag for product:%s", product.Product.Name)
 		return nil, err
 	}
 	return releaseTagRI, err
@@ -468,7 +472,7 @@ func (t *productCatalog) recreateQuota(logger *logrus.Entry, existingPlanInfo Pl
 		newQuota.Owner = quota.Quota.Owner
 		newQuotaRI, err := t.apicClient.CreateResourceInstance(newQuota)
 		if err != nil {
-			t.logger.Errorf("unable to recreate quota %s for product plan:%s", quota.Quota.Name, newPlanRI.Name)
+			t.logger.WithError(err).Errorf("unable to recreate quota %s for product plan:%s", quota.Quota.Name, newPlanRI.Name)
 			quotaCreateError = true
 		} else {
 			t.logger.Infof("Recreated quota id:%s, name: %s, plan: %s",
