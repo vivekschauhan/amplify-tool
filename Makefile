@@ -9,7 +9,11 @@ all: clean build
 
 build: ## Build the binary for linux
 	go build -o ./bin/$(PROJECT_NAME)
-
+	GOOS=windows GOARCH=amd64 go build -o ./bin/$(PROJECT_NAME)-windows-amd64
+	GOOS=windows GOARCH=arm64 go build -o ./bin/$(PROJECT_NAME)-windows-arm64
+	GOOS=linux GOARCH=386 go build -o ./bin/$(PROJECT_NAME)-linux-386
+	GOOS=linux GOARCH=arm64 go build -o ./bin/$(PROJECT_NAME)-linux-arm64
+	GOOS=linux GOARCH=amd64 go build -o ./bin/$(PROJECT_NAME)-linux-amd64
 clean: ## Clean out dir
 	rm -rf ./bin
 

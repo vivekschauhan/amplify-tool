@@ -48,9 +48,11 @@ func (t *productCatalog) ReadProducts() {
 		cp := catalog.NewProduct("")
 		ri, _ := product.AsInstance()
 		cp.FromInstance(ri)
-		logger := t.logger.
-			WithField("productName", cp.Name).
-			WithField("productStatus", cp.Status.Level)
+		logger := t.logger.WithField("productName", cp.Name)
+		if cp.Status != nil {
+			logger = logger.WithField("productStatus", cp.Status.Level)
+		}
+
 		logger.Info("Reading Product ok")
 		productReleases := t.readProductReleases(logger, product.GetMetadata().ID, cp.Name)
 		productInfo := ProductInfo{
@@ -76,9 +78,11 @@ func (t *productCatalog) readProductReleases(logger *logrus.Entry, productID, pr
 	for _, productRelease := range productReleases {
 		pr := catalog.NewProductRelease("")
 		pr.FromInstance(productRelease)
-		logger = logger.
-			WithField("productRelease", pr.Name).
-			WithField("productReleaseStatus", pr.Status.Level)
+		logger = logger.WithField("productRelease", pr.Name)
+		if pr.Status != nil {
+			logger = logger.WithField("productReleaseStatus", pr.Status.Level)
+		}
+
 		releaseTagName := strings.Split(pr.Spec.ReleaseTag, "/")
 		releaseTag := readReleaseTag(logger, t.apicClient, releaseTagName[1], catalog.ProductGVK().Kind, productName)
 		if releaseTag != nil {
@@ -143,9 +147,11 @@ func (t *productCatalog) readProductPlans(logger *logrus.Entry, productReleaseID
 	for _, productPlan := range productPlans {
 		pr := catalog.NewProductPlan("")
 		pr.FromInstance(productPlan)
-		logger = logger.
-			WithField("productPlan", pr.Name).
-			WithField("productPlanStatus", pr.Status.Level)
+		logger = logger.WithField("productPlan", pr.Name)
+		if pr.Status != nil {
+			logger = logger.WithField("productPlanStatus", pr.Status.Level)
+		}
+
 		logger.Debug("Reading ProductPlan ok")
 		quotas := t.readPlanQuotas(logger, pr.GetName())
 		planInfo := PlanInfo{
@@ -204,7 +210,7 @@ func (t *productCatalog) readQuotaAssetResources(logger *logrus.Entry, quota *ca
 
 func (t *productCatalog) PreProcessProductForAssetRepair() {
 	for _, product := range t.Products {
-		if product.Product.Status.Level == "Error" {
+		if product.Product.Status != nil && product.Product.Status.Level == "Error" {
 			logger := t.logger.
 				WithField("productID", product.Product.Metadata.ID).
 				WithField("productName", product.Product.Name)
@@ -226,7 +232,7 @@ func (t *productCatalog) PreProcessProductForAssetRepair() {
 
 func (t *productCatalog) PostProcessProductForAssetRepair() {
 	for _, product := range t.Products {
-		if product.Product.Status.Level == "Error" {
+		if product.Product.Status != nil && product.Product.Status.Level == "Error" {
 			logger := t.logger.
 				WithField("productID", product.Product.Metadata.ID).
 				WithField("productName", product.Product.Name)
@@ -261,44 +267,42 @@ func (t *productCatalog) PostProcessProductForAssetRepair() {
 }
 
 func (t *productCatalog) removeProductPlan(logger *logrus.Entry, productRelease ProductReleaseInfo, plan PlanInfo) {
-	if plan.Plan.Status.Level == "Error" {
-		logger = logger.
-			WithField("planID", plan.Plan.Metadata.ID).
-			WithField("planName", plan.Plan.Name)
-		switch plan.Plan.State {
-		case catalog.ProductPlanStateACTIVE:
-			// deprecate the plan
-			logger.Info("Deprecating Plan")
-			if !t.dryRun {
-				statusErr := t.apicClient.CreateSubResource(plan.Plan.ResourceMeta, map[string]interface{}{"state": catalog.ProductPlanStateDEPRECATED})
-				if statusErr != nil {
-					logger.WithError(statusErr).Error("error deprecating plan")
-					break
-				}
+	logger = logger.
+		WithField("planID", plan.Plan.Metadata.ID).
+		WithField("planName", plan.Plan.Name)
+	switch plan.Plan.State {
+	case catalog.ProductPlanStateACTIVE:
+		// deprecate the plan
+		logger.Info("Deprecating Plan")
+		if !t.dryRun {
+			statusErr := t.apicClient.CreateSubResource(plan.Plan.ResourceMeta, map[string]interface{}{"state": catalog.ProductPlanStateDEPRECATED})
+			if statusErr != nil {
+				logger.WithError(statusErr).Error("error deprecating plan")
+				break
 			}
-			fallthrough
-		case catalog.ProductPlanStateDEPRECATED:
-			// archive the plan
-			logger.Info("Archiving Plan")
-			if !t.dryRun {
-				statusErr := t.apicClient.CreateSubResource(plan.Plan.ResourceMeta, map[string]interface{}{"state": catalog.ProductPlanStateARCHIVED})
-				if statusErr != nil {
-					logger.WithError(statusErr).Error("error deprecating plan")
-					break
-				}
+		}
+		fallthrough
+	case catalog.ProductPlanStateDEPRECATED:
+		// archive the plan
+		logger.Info("Archiving Plan")
+		if !t.dryRun {
+			statusErr := t.apicClient.CreateSubResource(plan.Plan.ResourceMeta, map[string]interface{}{"state": catalog.ProductPlanStateARCHIVED})
+			if statusErr != nil {
+				logger.WithError(statusErr).Error("error deprecating plan")
+				break
 			}
-			fallthrough
-		case catalog.ProductPlanStateARCHIVED:
-			fallthrough
-		case catalog.ProductPlanStateDRAFT:
-			//delete the plan
-			logger.Info("Removing Plan")
-			if !t.dryRun {
-				statusErr := t.apicClient.DeleteResourceInstance(plan.Plan)
-				if statusErr != nil {
-					logger.WithError(statusErr).Error("error deleting plan")
-					break
-				}
+		}
+		fallthrough
+	case catalog.ProductPlanStateARCHIVED:
+		fallthrough
+	case catalog.ProductPlanStateDRAFT:
+		//delete the plan
+		logger.Info("Removing Plan")
+		if !t.dryRun {
+			statusErr := t.apicClient.DeleteResourceInstance(plan.Plan)
+			if statusErr != nil {
+				logger.WithError(statusErr).Error("error deleting plan")
+				break
 			}
 		}
 	}
@@ -310,7 +314,7 @@ func (t *productCatalog) deprecateAndArchiveCurrentProductRelease(logger *logrus
 		WithField("productReleaseID", productRelease.ProductRelease.Metadata.ID).
 		WithField("productReleaseName", productRelease.ProductRelease.Name).
 		WithField("releaseTag", productRelease.ProductRelease.Spec.ReleaseTag)
-	if productRelease.ProductRelease.Status.Level == "Error" {
+	if productRelease.ProductRelease.Status != nil && productRelease.ProductRelease.Status.Level == "Error" {
 		switch releaseTag.State.(string) {
 		case string(catalog.ProductStateACTIVE):
 			// deprecate the product release
@@ -342,7 +346,7 @@ func (t *productCatalog) setProductStateToDraft(logger *logrus.Entry, product Pr
 	if !t.dryRun {
 		statusErr := t.apicClient.CreateSubResource(product.Product.ResourceMeta, map[string]interface{}{"state": catalog.ProductStateDRAFT})
 		if statusErr != nil {
-			logger.WithError(statusErr).Error("unable to transition asset %s to draft", product.Product.Name)
+			logger.WithError(statusErr).Errorf("unable to transition asset %s to draft", product.Product.Name)
 			return statusErr
 		}
 	}
@@ -358,7 +362,7 @@ func (t *productCatalog) setProductReleaseTypeToManual(logger *logrus.Entry, pro
 	if !t.dryRun {
 		_, err := t.apicClient.UpdateResourceInstance(p)
 		if err != nil {
-			logger.WithError(err).Error("unable to update asset %s for draft", product.Product.Name)
+			logger.WithError(err).Errorf("unable to update asset %s for draft", product.Product.Name)
 		}
 	}
 }

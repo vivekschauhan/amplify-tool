@@ -44,8 +44,11 @@ func (t *assetCatalog) ReadAssets() {
 		ri, _ := asset.AsInstance()
 		ca.FromInstance(ri)
 		logger := t.logger.
-			WithField("asset", ca.GetName()).
-			WithField("assetStatus", ca.Status.Level)
+			WithField("asset", ca.GetName())
+		if ca.Status != nil {
+			logger = t.logger.
+				WithField("assetStatus", ca.Status.Level)
+		}
 		logger.Info("Reading Asset ok")
 		assetResources := t.readAssetResources(logger, ca.Name, catalog.AssetGVK().Kind)
 		assetReleases := t.readAssetReleases(logger, asset.GetMetadata().ID)
@@ -74,9 +77,10 @@ func (t *assetCatalog) readAssetReleases(logger *logrus.Entry, assetID string) m
 	for _, assetRelease := range assetReleases {
 		ar := catalog.NewAssetRelease("")
 		ar.FromInstance(assetRelease)
-		logger = logger.
-			WithField("assetRelease", ar.Name).
-			WithField("assetReleaseStatus", ar.Status.Level)
+		logger = logger.WithField("assetRelease", ar.Name)
+		if ar.Status != nil {
+			logger = logger.WithField("assetReleaseStatus", ar.Status.Level)
+		}
 
 		// assetResources := t.readAssetResources(logger, ar.Name, catalog.AssetReleaseGVK().Kind)
 		var releaseTag *catalog.ReleaseTag
@@ -137,7 +141,7 @@ func (t *assetCatalog) readAssetResources(logger *logrus.Entry, assetRelease, sc
 
 func (t *assetCatalog) RepairAsset() {
 	for _, asset := range t.Assets {
-		if asset.Asset.Status.Level == "Error" {
+		if asset.Asset.Status != nil && asset.Asset.Status.Level == "Error" {
 			logger := t.logger.
 				WithField("assetID", asset.Asset.Metadata.ID).
 				WithField("assetName", asset.Asset.Name)
@@ -243,7 +247,7 @@ func (t *assetCatalog) deprecateAndArchivePreviousAssetRelease(logger *logrus.En
 		WithField("assetReleaseID", releaseTag.Metadata.ID).
 		WithField("assetReleaseName", releaseTag.Name)
 
-	if assetRelease.AssetRelease.Status.Level == "Error" {
+	if assetRelease.AssetRelease.Status != nil && assetRelease.AssetRelease.Status.Level == "Error" {
 		switch releaseTag.State.(string) {
 		case string(catalog.AssetStateACTIVE):
 			// deprecate the asset release
