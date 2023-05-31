@@ -52,11 +52,11 @@ func (t *serviceRegistry) readAPIServices(logger *logrus.Entry, envName string) 
 		ri, _ := service.AsInstance()
 		svc.FromInstance(ri)
 		logger.Info("Reading APIService ok")
-		revisions := t.readAPIServiceRevisions(logger, svc.GetMetadata().ID, envName)
+		// revisions := t.readAPIServiceRevisions(logger, svc.GetMetadata().ID, envName)
 
 		serviceInfo := APIServiceInfo{
-			APIService:          svc,
-			APIServiceRevisions: revisions,
+			APIService: svc,
+			// APIServiceRevisions: revisions,
 		}
 		t.APIServices[svc.GetMetadata().ID] = serviceInfo
 	}

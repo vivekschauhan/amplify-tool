@@ -35,14 +35,13 @@ func NewAssetCatalog(logger *logrus.Logger, apicClient apic.Client, dryRun bool)
 func (t *assetCatalog) ReadAssets() {
 	t.logger.Info("Reading Assets...")
 	a := catalog.NewAsset("")
-	assets, err := t.apicClient.GetResources(a)
+	assets, err := t.apicClient.GetAPIV1ResourceInstances(nil, a.GetKindLink())
 	if err != nil {
 		t.logger.WithError(err).Error("unable to read assets")
 	}
 	for _, asset := range assets {
 		ca := catalog.NewAsset("")
-		ri, _ := asset.AsInstance()
-		ca.FromInstance(ri)
+		ca.FromInstance(asset)
 		logger := t.logger.
 			WithField("asset", ca.GetName())
 		if ca.Status != nil {
@@ -113,15 +112,14 @@ func (t *assetCatalog) readAssetReleases(logger *logrus.Entry, assetID string) m
 func (t *assetCatalog) readAssetResources(logger *logrus.Entry, assetRelease, scope string) map[string]AssetResourceInfo {
 	assetResourceInfos := make(map[string]AssetResourceInfo)
 	a, _ := catalog.NewAssetResource("", scope, assetRelease)
-	assetReleaseResources, err := t.apicClient.GetResources(a)
+	assetReleaseResources, err := t.apicClient.GetAPIV1ResourceInstances(nil, a.GetKindLink())
 	if err != nil {
 		logger.WithError(err).Error("unable to read asset resources")
 		return assetResourceInfos
 	}
 	for _, assetReleaseResource := range assetReleaseResources {
 		ar, _ := catalog.NewAssetResource("", scope, "")
-		ri, _ := assetReleaseResource.AsInstance()
-		ar.FromInstance(ri)
+		ar.FromInstance(assetReleaseResource)
 		assetResourceInfo := AssetResourceInfo{
 			AssetResource: ar,
 		}

@@ -9,7 +9,6 @@ import (
 	"github.com/Axway/agent-sdk/pkg/apic"
 	v1 "github.com/Axway/agent-sdk/pkg/apic/apiserver/models/api/v1"
 	catalog "github.com/Axway/agent-sdk/pkg/apic/apiserver/models/catalog/v1alpha1"
-	"github.com/Axway/agent-sdk/pkg/util/log"
 	"github.com/sirupsen/logrus"
 )
 
@@ -38,7 +37,7 @@ func NewProductCatalog(logger *logrus.Logger, apicClient apic.Client, dryRun boo
 func (t *productCatalog) ReadProducts() {
 	t.logger.Info("Reading Products...")
 	p := catalog.NewProduct("")
-	products, err := t.apicClient.GetResources(p)
+	products, err := t.apicClient.GetAPIV1ResourceInstances(nil, p.GetKindLink())
 	if err != nil {
 		t.logger.WithError(err).Error("unable to read products")
 		return
@@ -46,8 +45,7 @@ func (t *productCatalog) ReadProducts() {
 
 	for _, product := range products {
 		cp := catalog.NewProduct("")
-		ri, _ := product.AsInstance()
-		cp.FromInstance(ri)
+		cp.FromInstance(product)
 		logger := t.logger.WithField("productName", cp.Name)
 		if cp.Status != nil {
 			logger = logger.WithField("productStatus", cp.Status.Level)
@@ -167,7 +165,7 @@ func (t *productCatalog) readProductPlans(logger *logrus.Entry, productReleaseID
 func (t *productCatalog) readPlanQuotas(logger *logrus.Entry, planName string) map[string]QuotaInfo {
 	quotaInfos := make(map[string]QuotaInfo)
 	q := catalog.NewQuota("", planName)
-	planQuotas, err := t.apicClient.GetResources(q)
+	planQuotas, err := t.apicClient.GetAPIV1ResourceInstances(nil, q.GetKindLink())
 	if err != nil {
 		logger.WithError(err).Error("unable to read quotas")
 		return quotaInfos
@@ -175,14 +173,13 @@ func (t *productCatalog) readPlanQuotas(logger *logrus.Entry, planName string) m
 
 	for _, quota := range planQuotas {
 		pq := catalog.NewQuota("", planName)
-		ri, _ := quota.AsInstance()
-		pq.FromInstance(ri)
+		pq.FromInstance(quota)
 		logger = logger.WithField("quota", pq.Name)
 		logger.Debug("Reading Quota ok")
-		quotaAssetResources := t.readQuotaAssetResources(logger, pq)
+		// quotaAssetResources := t.readQuotaAssetResources(logger, pq)
 		quotaInfo := QuotaInfo{
-			Quota:          pq,
-			AssetResources: quotaAssetResources,
+			Quota: pq,
+			// AssetResources: quotaAssetResources,
 		}
 		quotaInfos[pq.Metadata.ID] = quotaInfo
 	}
@@ -485,7 +482,7 @@ func (t *productCatalog) recreateQuota(logger *logrus.Entry, existingPlanInfo Pl
 
 func (t *productCatalog) ActivateProductPlan(plan v1.Interface) {
 	planRI, _ := plan.AsInstance()
-	log.Infof("Activating Product plan: %s", planRI.Title)
+	t.logger.Infof("Activating Product plan: %s", planRI.Title)
 	if !t.dryRun {
 		statusErr := t.apicClient.CreateSubResource(planRI.ResourceMeta, map[string]interface{}{"state": catalog.ProductPlanStateACTIVE})
 		if statusErr != nil {
