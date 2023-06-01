@@ -71,6 +71,7 @@ func (t *tool) Run() error {
 	t.productCatalog.PreProcessProductForAssetRepair()
 	t.assetCatalog.RepairAsset()
 	t.productCatalog.PostProcessProductForAssetRepair()
+	t.assetCatalog.PostRepairAsset()
 	return nil
 }
 

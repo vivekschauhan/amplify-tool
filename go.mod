@@ -3,7 +3,7 @@ module github.com/vivekschauhan/amplify-tool
 go 1.19
 
 require (
-	github.com/Axway/agent-sdk v1.1.53-0.20230529201016-5ee0ead01805
+	github.com/Axway/agent-sdk v1.1.53-0.20230601201557-51437d935df3
 	github.com/sirupsen/logrus v1.9.2
 	github.com/spf13/cobra v1.7.0
 	github.com/spf13/pflag v1.0.5

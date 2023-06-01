@@ -53,9 +53,12 @@ func (t *productCatalog) ReadProducts() {
 
 		logger.Info("Reading Product ok")
 		productReleases := t.readProductReleases(logger, product.GetMetadata().ID, cp.Name)
+		plansWithNoRelease := t.readProductPlans(logger, product.GetMetadata().ID, true)
+
 		productInfo := ProductInfo{
-			Product:         cp,
-			ProductReleases: productReleases,
+			Product:            cp,
+			ProductReleases:    productReleases,
+			PlansWithNoRelease: plansWithNoRelease,
 		}
 
 		t.Products[product.GetMetadata().ID] = productInfo
@@ -88,7 +91,7 @@ func (t *productCatalog) readProductReleases(logger *logrus.Entry, productID, pr
 		}
 		logger.Debug("Reading ProductRelease ok")
 
-		plans := t.readProductPlans(logger, pr.GetMetadata().ID)
+		plans := t.readProductPlans(logger, pr.GetMetadata().ID, false)
 		productReleaseInfo := ProductReleaseInfo{
 			ProductRelease: pr,
 			Plans:          plans,
@@ -130,11 +133,11 @@ func readReleaseTag(logger *logrus.Entry, apicClient apic.Client, releaseName, r
 	return releaseTag
 }
 
-func (t *productCatalog) readProductPlans(logger *logrus.Entry, productReleaseID string) map[string]PlanInfo {
+func (t *productCatalog) readProductPlans(logger *logrus.Entry, referenceID string, withNoReference bool) map[string]PlanInfo {
 	plans := make(map[string]PlanInfo)
 	p := catalog.NewProductPlan("")
 	params := map[string]string{
-		"query": fmt.Sprintf("metadata.references.id==%s", productReleaseID),
+		"query": fmt.Sprintf("metadata.references.id==%s", referenceID),
 	}
 	productPlans, err := t.apicClient.GetAPIV1ResourceInstances(params, p.GetKindLink())
 	if err != nil {
@@ -148,6 +151,9 @@ func (t *productCatalog) readProductPlans(logger *logrus.Entry, productReleaseID
 		logger = logger.WithField("productPlan", pr.Name)
 		if pr.Status != nil {
 			logger = logger.WithField("productPlanStatus", pr.Status.Level)
+		}
+		if withNoReference && pr.References != nil && pr.References.Product.Release != "" {
+			continue
 		}
 
 		logger.Debug("Reading ProductPlan ok")
@@ -214,11 +220,13 @@ func (t *productCatalog) PreProcessProductForAssetRepair() {
 			logger.Info("Preprocessing product")
 			for _, productRelease := range product.ProductReleases {
 				for _, plan := range productRelease.Plans {
-					t.removeProductPlan(logger, productRelease, plan)
+					t.removeProductPlan(logger, plan)
 				}
-				t.deprecateAndArchiveCurrentProductRelease(logger, productRelease)
+				t.deprecateCurrentProductRelease(logger, productRelease)
 			}
-
+			for _, plan := range product.PlansWithNoRelease {
+				t.removeProductPlan(logger, plan)
+			}
 			statusErr := t.setProductStateToDraft(logger, product)
 			if statusErr == nil {
 				t.setProductReleaseTypeToManual(logger, product)
@@ -233,7 +241,22 @@ func (t *productCatalog) PostProcessProductForAssetRepair() {
 			logger := t.logger.
 				WithField("productID", product.Product.Metadata.ID).
 				WithField("productName", product.Product.Name)
+
 			t.reapplyAutoRelease(logger, product)
+			if product.Product.State == catalog.ProductStateDRAFT {
+				for _, plan := range product.PlansWithNoRelease {
+					logger := logger.WithField("existingProductPlanName", plan.Plan.Name)
+					newPlanRI, err := t.recreatePlan(logger, product, plan, nil)
+					if err == nil {
+						logger := logger.
+							WithField("newProductPlanID", newPlanRI.Metadata.ID).
+							WithField("newProductPlanName", newPlanRI.Name)
+						logger.Infof("Recreated product plan")
+						t.recreateQuota(logger, plan, newPlanRI)
+					}
+				}
+				continue
+			}
 			releaseTagRI, err := t.createReleaseTag(logger, product)
 			if err == nil {
 				logger = logger.
@@ -258,12 +281,15 @@ func (t *productCatalog) PostProcessProductForAssetRepair() {
 						}
 					}
 				}
+				for _, productRelease := range product.ProductReleases {
+					t.archiveCurrentProductRelease(logger, productRelease)
+				}
 			}
 		}
 	}
 }
 
-func (t *productCatalog) removeProductPlan(logger *logrus.Entry, productRelease ProductReleaseInfo, plan PlanInfo) {
+func (t *productCatalog) removeProductPlan(logger *logrus.Entry, plan PlanInfo) {
 	logger = logger.
 		WithField("planID", plan.Plan.Metadata.ID).
 		WithField("planName", plan.Plan.Name)
@@ -305,7 +331,29 @@ func (t *productCatalog) removeProductPlan(logger *logrus.Entry, productRelease 
 	}
 }
 
-func (t *productCatalog) deprecateAndArchiveCurrentProductRelease(logger *logrus.Entry, productRelease ProductReleaseInfo) {
+func (t *productCatalog) archiveCurrentProductRelease(logger *logrus.Entry, productRelease ProductReleaseInfo) {
+	releaseTag := productRelease.ReleaseTag
+	logger = logger.
+		WithField("productReleaseID", productRelease.ProductRelease.Metadata.ID).
+		WithField("productReleaseName", productRelease.ProductRelease.Name).
+		WithField("releaseTag", productRelease.ProductRelease.Spec.ReleaseTag)
+	if productRelease.ProductRelease.Status != nil && productRelease.ProductRelease.Status.Level == "Error" {
+		switch releaseTag.State.(string) {
+		case string(catalog.ProductStateDEPRECATED):
+			// archive the product release
+			logger.Info("Archiving ProductRelease")
+			if !t.dryRun {
+				statusErr := t.apicClient.CreateSubResource(releaseTag.ResourceMeta, map[string]interface{}{"state": catalog.ProductStateARCHIVED})
+				if statusErr != nil {
+					logger.WithError(statusErr).Error("error deprecating plan")
+					break
+				}
+			}
+		}
+	}
+}
+
+func (t *productCatalog) deprecateCurrentProductRelease(logger *logrus.Entry, productRelease ProductReleaseInfo) {
 	releaseTag := productRelease.ReleaseTag
 	logger = logger.
 		WithField("productReleaseID", productRelease.ProductRelease.Metadata.ID).
@@ -323,17 +371,7 @@ func (t *productCatalog) deprecateAndArchiveCurrentProductRelease(logger *logrus
 					break
 				}
 			}
-			fallthrough
-		case string(catalog.ProductStateDEPRECATED):
-			// archive the product release
-			logger.Info("Archiving ProductRelease")
-			if !t.dryRun {
-				statusErr := t.apicClient.CreateSubResource(releaseTag.ResourceMeta, map[string]interface{}{"state": catalog.ProductStateARCHIVED})
-				if statusErr != nil {
-					logger.WithError(statusErr).Error("error deprecating plan")
-					break
-				}
-			}
+			releaseTag.State = string(catalog.ProductStateDEPRECATED)
 		}
 	}
 }
@@ -370,20 +408,22 @@ func (t *productCatalog) setProductReleaseTypeToManual(logger *logrus.Entry, pro
 
 func (t *productCatalog) reapplyAutoRelease(logger *logrus.Entry, product ProductInfo) {
 	if product.Product.Spec.AutoRelease != nil {
-		logger.
-			WithField("originalReleaseType", product.Product.Spec.AutoRelease.ReleaseType).
-			Info("Updating product release type to original release type")
-		ri, _ := t.apicClient.GetResource(product.Product.GetSelfLink())
-		p := catalog.NewProduct("")
-		p.FromInstance(ri)
+		logger = logger.WithField("originalReleaseType", product.Product.Spec.AutoRelease.ReleaseType)
+	}
+	logger.Info("Updating product release type to original release type")
+	ri, _ := t.apicClient.GetResource(product.Product.GetSelfLink())
+	p := catalog.NewProduct("")
+	p.FromInstance(ri)
+	p.ResourceMeta.Metadata.ResourceVersion = ""
+	if product.Product.Spec.AutoRelease != nil {
 		p.Spec.AutoRelease = &catalog.ProductSpecAutoRelease{
 			ReleaseType: product.Product.Spec.AutoRelease.ReleaseType,
 		}
-		if !t.dryRun {
-			_, err := t.apicClient.UpdateResourceInstance(p)
-			if err != nil {
-				logger.WithError(err).Error("unable to update product auto release")
-			}
+	}
+	if !t.dryRun {
+		_, err := t.apicClient.UpdateResourceInstance(p)
+		if err != nil {
+			logger.WithError(err).Error("unable to update product auto release")
 		}
 	}
 }
@@ -414,6 +454,7 @@ func (t *productCatalog) waitForProductRelease(releaseTagID string) {
 	for newProductRelease := t.getProductReleaseForReleaseTag(releaseTagID); newProductRelease == nil && n < 5; {
 		newProductRelease = t.getProductReleaseForReleaseTag(releaseTagID)
 		n++
+		time.Sleep(time.Second)
 	}
 }
 func (t *productCatalog) getPreRepairLastRelease(product ProductInfo) ProductReleaseInfo {
@@ -440,10 +481,12 @@ func (t *productCatalog) recreatePlan(logger *logrus.Entry, product ProductInfo,
 	newPlan.Attributes = plan.Plan.Attributes
 	newPlan.Spec = plan.Plan.Spec
 	newPlan.Owner = plan.Plan.Owner
-	newPlan.References = catalog.ProductPlanReferences{
-		Product: catalog.ProductPlanReferencesProduct{
-			Release: releaseTagRI.Name,
-		},
+	if releaseTagRI != nil {
+		newPlan.References = &catalog.ProductPlanReferences{
+			Product: catalog.ProductPlanReferencesProduct{
+				Release: releaseTagRI.Name,
+			},
+		}
 	}
 	if t.dryRun {
 		newPlan.Name = "dry-run"

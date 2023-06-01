@@ -33,8 +33,9 @@ type AssetResourceInfo struct {
 }
 
 type ProductInfo struct {
-	Product         *catalog.Product
-	ProductReleases map[string]ProductReleaseInfo
+	Product            *catalog.Product
+	ProductReleases    map[string]ProductReleaseInfo
+	PlansWithNoRelease map[string]PlanInfo
 }
 
 type ProductReleaseInfo struct {

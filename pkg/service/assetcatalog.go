@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Axway/agent-sdk/pkg/apic"
 	v1 "github.com/Axway/agent-sdk/pkg/apic/apiserver/models/api/v1"
@@ -14,6 +15,7 @@ import (
 type AssetCatalog interface {
 	ReadAssets() error
 	RepairAsset()
+	PostRepairAsset()
 }
 
 type assetCatalog struct {
@@ -175,12 +177,65 @@ func (t *assetCatalog) RepairAsset() {
 				// if err != nil {
 				// 	t.logger.WithError(err).Error("unable to update asset %s for draft", asset.Asset.Name)
 				// }
-				t.createAssetRelease(logger, asset)
-				for _, assetRelease := range asset.AssetReleases {
-					t.deprecateAndArchivePreviousAssetRelease(logger, assetRelease)
+				releaseTagRI, err := t.createAssetRelease(logger, asset)
+				if err == nil {
+					logger = logger.
+						WithField("newReleaseTagID", releaseTagRI.Metadata.ID).
+						WithField("newReleaseTagName", releaseTagRI.Name)
+					logger.Info("Created new ReleaseTag for Asset")
+
+					t.waitForAssetRelease(releaseTagRI.Metadata.ID)
+
+					for _, assetRelease := range asset.AssetReleases {
+						t.deprecatePreviousAssetRelease(logger, assetRelease)
+					}
 				}
 			}
 
+		}
+	}
+}
+
+func (t *assetCatalog) waitForAssetRelease(releaseTagID string) {
+	if t.dryRun {
+		return
+	}
+	n := 0
+	for newAssetRelease := t.getAssetReleaseForReleaseTag(releaseTagID); newAssetRelease == nil && n < 5; {
+		newAssetRelease = t.getAssetReleaseForReleaseTag(releaseTagID)
+		n++
+		time.Sleep(time.Second)
+	}
+}
+
+func (t *assetCatalog) getAssetReleaseForReleaseTag(releaseTagID string) *catalog.AssetRelease {
+	a := catalog.NewAssetRelease("")
+
+	params := map[string]string{
+		"query": fmt.Sprintf("metadata.references.id==%s", releaseTagID),
+	}
+	assetReleases, err := t.apicClient.GetAPIV1ResourceInstances(params, a.GetKindLink())
+	if err != nil {
+		t.logger.Error(err)
+	}
+	for _, assetRelease := range assetReleases {
+		a.FromInstance(assetRelease)
+		return a
+	}
+
+	return nil
+}
+
+func (t *assetCatalog) PostRepairAsset() {
+	for _, asset := range t.Assets {
+		if asset.Asset.Status != nil && asset.Asset.Status.Level == "Error" {
+			logger := t.logger.
+				WithField("assetID", asset.Asset.Metadata.ID).
+				WithField("assetName", asset.Asset.Name)
+			logger.Infof("Post processing asset")
+			for _, assetRelease := range asset.AssetReleases {
+				t.archivePreviousAssetRelease(logger, assetRelease)
+			}
 		}
 	}
 }
@@ -247,27 +302,25 @@ func (t *assetCatalog) setAssetToDraft(logger *logrus.Entry, asset AssetInfo) er
 	return nil
 }
 
-func (t *assetCatalog) createAssetRelease(logger *logrus.Entry, asset AssetInfo) {
+func (t *assetCatalog) createAssetRelease(logger *logrus.Entry, asset AssetInfo) (*v1.ResourceInstance, error) {
 	logger.Info("Creating new asset release")
 	releaseTag, _ := catalog.NewReleaseTag("", catalog.AssetGVK().Kind, asset.Asset.Name)
 	releaseTag.Spec.ReleaseType = "patch"
 	releaseTag.Title = asset.Asset.Title
-	ri, err := releaseTag.AsInstance()
-	if !t.dryRun {
-		ri, err = t.apicClient.CreateResourceInstance(releaseTag)
-		if err != nil {
-			logger.WithError(err).Errorf("unable to create new release tag asset:%s", asset.Asset.Name)
-		}
+	if t.dryRun {
+		releaseTag.Name = "dry-run"
+		return releaseTag.AsInstance()
 	}
-	if err == nil {
-		logger = logger.
-			WithField("newReleaseTagID", ri.Metadata.ID).
-			WithField("newReleaseTagName", ri.Name)
-		logger.Info("Created new ReleaseTag for Asset")
+
+	releaseTagRI, err := t.apicClient.CreateResourceInstance(releaseTag)
+	if err != nil {
+		logger.WithError(err).Errorf("unable to create new release tag for asset: %s", asset.Asset.Name)
+		return nil, err
 	}
+	return releaseTagRI, err
 }
 
-func (t *assetCatalog) deprecateAndArchivePreviousAssetRelease(logger *logrus.Entry, assetRelease AssetReleaseInfo) {
+func (t *assetCatalog) deprecatePreviousAssetRelease(logger *logrus.Entry, assetRelease AssetReleaseInfo) {
 	releaseTag := assetRelease.ReleaseTag
 	logger = logger.
 		WithField("assetReleaseID", releaseTag.Metadata.ID).
@@ -285,7 +338,18 @@ func (t *assetCatalog) deprecateAndArchivePreviousAssetRelease(logger *logrus.En
 					break
 				}
 			}
-			fallthrough
+		}
+	}
+}
+
+func (t *assetCatalog) archivePreviousAssetRelease(logger *logrus.Entry, assetRelease AssetReleaseInfo) {
+	releaseTag := assetRelease.ReleaseTag
+	logger = logger.
+		WithField("assetReleaseID", releaseTag.Metadata.ID).
+		WithField("assetReleaseName", releaseTag.Name)
+
+	if assetRelease.AssetRelease.Status != nil && assetRelease.AssetRelease.Status.Level == "Error" {
+		switch releaseTag.State.(string) {
 		case string(catalog.AssetStateDEPRECATED):
 			// archive the asset release
 			logger.Info("Archiving AssetRelease")
