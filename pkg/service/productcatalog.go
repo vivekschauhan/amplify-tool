@@ -507,7 +507,7 @@ func (t *productCatalog) recreateQuota(logger *logrus.Entry, existingPlanInfo Pl
 		return false
 	}
 	for _, quota := range existingPlanInfo.Quotas {
-		newQuota := catalog.NewQuota("", existingPlanInfo.Plan.Name)
+		newQuota := catalog.NewQuota("", newPlanRI.Name)
 		newQuota.Title = quota.Quota.Title
 		newQuota.Tags = quota.Quota.Tags
 		newQuota.Attributes = quota.Quota.Attributes
