@@ -14,6 +14,7 @@ import (
 
 type ProductCatalog interface {
 	ReadProducts()
+	WriteProducts()
 	PreProcessProductForAssetRepair()
 	PostProcessProductForAssetRepair()
 }
@@ -32,6 +33,10 @@ func NewProductCatalog(logger *logrus.Logger, apicClient apic.Client, dryRun boo
 		Products:   make(map[string]ProductInfo),
 		dryRun:     dryRun,
 	}
+}
+
+func (t *productCatalog) WriteProducts() {
+	saveToFile(t.logger, "product-catalog", t.Products)
 }
 
 func (t *productCatalog) ReadProducts() {

@@ -64,6 +64,7 @@ func createAPICClient(cfg *Config) apic.Client {
 func (t *tool) Run() error {
 	t.logger.Info("Amplify Asset Tool")
 	err := t.Read()
+	t.Write()
 	if err != nil {
 		t.logger.WithError(err).Error("stopping the repair")
 		return err
@@ -78,9 +79,17 @@ func (t *tool) Run() error {
 func (t *tool) Read() error {
 	t.serviceRegistry.ReadServices()
 	err := t.assetCatalog.ReadAssets()
+	t.productCatalog.ReadProducts()
 	if err != nil {
 		return err
 	}
-	t.productCatalog.ReadProducts()
+
+	return nil
+}
+
+func (t *tool) Write() error {
+	t.serviceRegistry.WriteServices()
+	t.assetCatalog.WriteAssets()
+	t.productCatalog.WriteProducts()
 	return nil
 }

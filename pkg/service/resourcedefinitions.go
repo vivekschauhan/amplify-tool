@@ -7,49 +7,49 @@ import (
 )
 
 type APIServiceInfo struct {
-	APIService          *management.APIService
-	APIServiceRevisions map[string]APIServiceRevisionInfo
+	APIService          *management.APIService            `json:"apiService,omitempty"`
+	APIServiceRevisions map[string]APIServiceRevisionInfo `json:"apiServiceRevisions,omitempty"`
 }
 
 type APIServiceRevisionInfo struct {
-	APIServiceRevision  *management.APIServiceRevision
-	APIServiceInstances map[string]*management.APIServiceInstance
+	APIServiceRevision  *management.APIServiceRevision            `json:"apiServiceRevision,omitempty"`
+	APIServiceInstances map[string]*management.APIServiceInstance `json:"apiServiceInstances,omitempty"`
 }
 
 type AssetInfo struct {
-	Asset                    *catalog.Asset
-	DeletedServiceReferences []v1.Reference
-	AssetResources           map[string]AssetResourceInfo
-	AssetReleases            map[string]AssetReleaseInfo
+	Asset                    *catalog.Asset               `json:"asset,omitempty"`
+	DeletedServiceReferences []v1.Reference               `json:"deletedServiceReferences,omitempty"`
+	AssetResources           map[string]AssetResourceInfo `json:"assetResources,omitempty"`
+	AssetReleases            map[string]AssetReleaseInfo  `json:"assetReleases,omitempty"`
 }
 
 type AssetReleaseInfo struct {
-	AssetRelease   *catalog.AssetRelease
-	ReleaseTag     *catalog.ReleaseTag
-	AssetResources map[string]AssetResourceInfo
+	AssetRelease   *catalog.AssetRelease        `json:"assetRelease,omitempty"`
+	ReleaseTag     *catalog.ReleaseTag          `json:"releaseTag,omitempty"`
+	AssetResources map[string]AssetResourceInfo `json:"assetResources,omitempty"`
 }
 type AssetResourceInfo struct {
-	AssetResource *catalog.AssetResource
+	AssetResource *catalog.AssetResource `json:"assetResource,omitempty"`
 }
 
 type ProductInfo struct {
-	Product            *catalog.Product
-	ProductReleases    map[string]ProductReleaseInfo
-	PlansWithNoRelease map[string]PlanInfo
+	Product            *catalog.Product              `json:"product,omitempty"`
+	ProductReleases    map[string]ProductReleaseInfo `json:"productReleases,omitempty"`
+	PlansWithNoRelease map[string]PlanInfo           `json:"planWithNoRelease,omitempty"`
 }
 
 type ProductReleaseInfo struct {
-	ProductRelease *catalog.ProductRelease
-	ReleaseTag     *catalog.ReleaseTag
-	Plans          map[string]PlanInfo
+	ProductRelease *catalog.ProductRelease `json:"productRelease,omitempty"`
+	ReleaseTag     *catalog.ReleaseTag     `json:"releaseTag,omitempty"`
+	Plans          map[string]PlanInfo     `json:"productPlans,omitempty"`
 }
 
 type PlanInfo struct {
-	Plan   *catalog.ProductPlan
-	Quotas map[string]QuotaInfo
+	Plan   *catalog.ProductPlan `json:"productPlan,omitempty"`
+	Quotas map[string]QuotaInfo `json:"quotas,omitempty"`
 }
 
 type QuotaInfo struct {
-	Quota          *catalog.Quota
-	AssetResources map[string]*catalog.AssetResource
+	Quota          *catalog.Quota                    `json:"quota,omitempty"`
+	AssetResources map[string]*catalog.AssetResource `json:"assetResources,omitempty"`
 }

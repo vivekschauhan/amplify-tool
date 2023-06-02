@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Axway/agent-sdk/pkg/cmd"
+	"github.com/Axway/agent-sdk/pkg/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -11,6 +13,11 @@ import (
 
 // NewRootCmd creates a new cobra.Command
 func NewRootCmd() *cobra.Command {
+	config.AgentTypeName = cmd.BuildAgentName
+	config.AgentVersion = cmd.BuildVersion
+	config.AgentDataPlaneType = cmd.BuildDataPlaneType
+	config.SDKVersion = cmd.SDKBuildVersion
+
 	rootCmd := &cobra.Command{Use: ""}
 	rootCmd.AddCommand(newRepairCmd())
 	return rootCmd

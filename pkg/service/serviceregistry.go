@@ -1,7 +1,9 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/Axway/agent-sdk/pkg/apic"
 	management "github.com/Axway/agent-sdk/pkg/apic/apiserver/models/management/v1alpha1"
@@ -10,6 +12,7 @@ import (
 
 type ServiceRegistry interface {
 	ReadServices()
+	WriteServices()
 	GetAPIService(env, name string) *management.APIService
 }
 
@@ -29,9 +32,28 @@ func NewServiceRegistry(logger *logrus.Logger, apicClient apic.Client, dryRun bo
 	}
 }
 
+func saveToFile(logger *logrus.Logger, objType string, obj interface{}) {
+	fileName := fmt.Sprintf("%s.json", objType)
+	buf, err := json.Marshal(obj)
+	if err != nil {
+		logger.WithError(err).Errorf("unable to serialize %s to file %s", objType, fileName)
+		return
+	}
+	os.WriteFile(fileName, buf, 0777)
+}
+
+func (t *serviceRegistry) WriteServices() {
+	saveToFile(t.logger, "service-registry", t.APIServices)
+}
+
 func (t *serviceRegistry) ReadServices() {
 	e := management.NewEnvironment("")
-	envs, _ := t.apicClient.GetResources(e)
+
+	// envs, _ := t.apicClient.GetResources(e)
+	envs, err := t.apicClient.GetAPIV1ResourceInstances(nil, e.GetKindLink())
+	if err != nil {
+		t.logger.WithError(err).Error("unable to read environments")
+	}
 	t.logger.Info("Reading API Service...")
 	for _, env := range envs {
 		envName := env.GetName()
@@ -42,16 +64,14 @@ func (t *serviceRegistry) ReadServices() {
 
 func (t *serviceRegistry) readAPIServices(logger *logrus.Entry, envName string) {
 	s := management.NewAPIService("", envName)
-	services, err := t.apicClient.GetResources(s)
+	services, err := t.apicClient.GetAPIV1ResourceInstances(nil, s.GetKindLink())
 	if err != nil {
-		t.logger.Error(err)
+		t.logger.WithError(err).Error("unable to read assets")
 	}
 	for _, service := range services {
 		logger = logger.WithField("apiService", service.GetName())
 		svc := management.NewAPIService("", "")
-
-		ri, _ := service.AsInstance()
-		svc.FromInstance(ri)
+		svc.FromInstance(service)
 		logger.Info("Reading APIService ok")
 		// revisions := t.readAPIServiceRevisions(logger, svc.GetMetadata().ID, envName)
 

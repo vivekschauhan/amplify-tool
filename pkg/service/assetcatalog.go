@@ -14,6 +14,7 @@ import (
 
 type AssetCatalog interface {
 	ReadAssets() error
+	WriteAssets()
 	RepairAsset()
 	PostRepairAsset()
 }
@@ -34,6 +35,10 @@ func NewAssetCatalog(logger *logrus.Logger, serviceRegistry ServiceRegistry, api
 		serviceRegistry: serviceRegistry,
 		dryRun:          dryRun,
 	}
+}
+
+func (t *assetCatalog) WriteAssets() {
+	saveToFile(t.logger, "asset-catalog", t.Assets)
 }
 
 func (t *assetCatalog) ReadAssets() error {
