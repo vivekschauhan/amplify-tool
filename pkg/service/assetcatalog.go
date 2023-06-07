@@ -308,7 +308,9 @@ func (t *assetCatalog) createAssetMapping(logger *logrus.Entry, assetName string
 			if am != nil {
 				refName := am.Status.Outputs[0].Resource.AssetResource.Ref
 				element := strings.Split(refName, "/")
-				t.AssetResourcesMap[assetResourceMapKey(assetName, svc.Name)] = assetResourceMapKey(assetName, element[2])
+				if len(element) == 3 {
+					t.AssetResourcesMap[assetResourceMapKey(assetName, assetSvcRef.Name)] = assetResourceMapKey(assetName, element[2])
+				}
 			}
 			logger = logger.
 				WithField("newAssetMappingID", ri.Metadata.ID).
