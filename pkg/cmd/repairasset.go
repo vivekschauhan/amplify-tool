@@ -40,7 +40,7 @@ func initRepairCmdFlags(cmd *cobra.Command) {
 	cmd.Flags().String("auth.client_id", "", "The service account client ID")
 	cmd.MarkFlagRequired("auth.client_id")
 	cmd.Flags().Duration("auth.timeout", 10*time.Second, "The connection timeout for AxwayID")
-
+	cmd.Flags().String("service_mapping_file", "", "The path of the service mapping file")
 	cmd.Flags().String("log_level", "info", "log level")
 	cmd.Flags().String("log_format", "json", "line or json")
 	cmd.Flags().Bool("dry_run", false, "Run the tool with no update(true/false)")

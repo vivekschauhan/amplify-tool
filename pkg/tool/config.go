@@ -6,12 +6,13 @@ import (
 
 // Config the configuration for the Watch client
 type Config struct {
-	TenantID    string      `mapstructure:"tenant_id"`
-	URL         string      `mapstructure:"url"`
-	PlatformURL string      `mapstructure:"platform_url"`
-	Port        uint32      `mapstructure:"port"`
-	Auth        auth.Config `mapstructure:"auth"`
-	Level       string      `mapstructure:"log_level"`
-	Format      string      `mapstructure:"log_format"`
-	DryRun      bool        `mapstructure:"dry_run"`
+	TenantID           string      `mapstructure:"tenant_id"`
+	URL                string      `mapstructure:"url"`
+	PlatformURL        string      `mapstructure:"platform_url"`
+	Port               uint32      `mapstructure:"port"`
+	Auth               auth.Config `mapstructure:"auth"`
+	Level              string      `mapstructure:"log_level"`
+	Format             string      `mapstructure:"log_format"`
+	DryRun             bool        `mapstructure:"dry_run"`
+	ServiceMappingFile string      `mapstructure:"service_mapping_file"`
 }

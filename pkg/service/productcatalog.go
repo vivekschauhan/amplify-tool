@@ -20,18 +20,20 @@ type ProductCatalog interface {
 }
 
 type productCatalog struct {
-	logger     *logrus.Logger
-	apicClient apic.Client
-	Products   map[string]ProductInfo
-	dryRun     bool
+	logger       *logrus.Logger
+	apicClient   apic.Client
+	Products     map[string]ProductInfo
+	assetCatalog AssetCatalog
+	dryRun       bool
 }
 
-func NewProductCatalog(logger *logrus.Logger, apicClient apic.Client, dryRun bool) ProductCatalog {
+func NewProductCatalog(logger *logrus.Logger, assetCatalog AssetCatalog, apicClient apic.Client, dryRun bool) ProductCatalog {
 	return &productCatalog{
-		logger:     logger,
-		apicClient: apicClient,
-		Products:   make(map[string]ProductInfo),
-		dryRun:     dryRun,
+		logger:       logger,
+		apicClient:   apicClient,
+		Products:     make(map[string]ProductInfo),
+		assetCatalog: assetCatalog,
+		dryRun:       dryRun,
 	}
 }
 
@@ -516,11 +518,22 @@ func (t *productCatalog) recreateQuota(logger *logrus.Entry, existingPlanInfo Pl
 		newQuota.Title = quota.Quota.Title
 		newQuota.Tags = quota.Quota.Tags
 		newQuota.Attributes = quota.Quota.Attributes
-		newQuota.Spec = quota.Quota.Spec
+		newQuota.Spec = t.recreateQuotaSpec(logger, quota.Quota.Spec)
 		newQuota.Owner = quota.Quota.Owner
+		if len(newQuota.Spec.Resources) == 0 {
+			logger.
+				WithField("quotaName", quota.Quota.Name).
+				WithField("planName", newPlanRI.Name).
+				Error("unable to recreate quota, no asset resources were found")
+			return false
+		}
 		newQuotaRI, err := t.apicClient.CreateResourceInstance(newQuota)
 		if err != nil {
-			t.logger.WithError(err).Errorf("unable to recreate quota %s for product plan:%s", quota.Quota.Name, newPlanRI.Name)
+			logger.
+				WithField("quotaName", quota.Quota.Name).
+				WithField("planName", newPlanRI.Name).
+				WithError(err).
+				Errorf("unable to recreate quota")
 			quotaCreateError = true
 		} else {
 			t.logger.Infof("Recreated quota id:%s, name: %s, plan: %s",
@@ -530,6 +543,30 @@ func (t *productCatalog) recreateQuota(logger *logrus.Entry, existingPlanInfo Pl
 		}
 	}
 	return quotaCreateError
+}
+
+func (t *productCatalog) recreateQuotaSpec(logger *logrus.Entry, existingQuotaSpec catalog.QuotaSpec) catalog.QuotaSpec {
+	quotaSpec := catalog.QuotaSpec{
+		Description: existingQuotaSpec.Description,
+		Unit:        existingQuotaSpec.Unit,
+		Pricing:     existingQuotaSpec.Pricing,
+	}
+	quotaResources := make([]interface{}, 0)
+	for _, quotaResource := range existingQuotaSpec.Resources {
+		buf, _ := json.Marshal(quotaResource)
+		qar := &catalog.QuotaSpecAssetResourceRef{}
+		json.Unmarshal(buf, qar)
+		if qar.Kind == "AssetResource" {
+			assetResName := t.assetCatalog.FindAssetResource(logger, qar.Name)
+			if assetResName == "" {
+				logger.WithField("assetName", qar.Name).Warn("missing asset resource")
+				continue
+			}
+		}
+		quotaResources = append(quotaResources, qar)
+	}
+	quotaSpec.Resources = quotaResources
+	return quotaSpec
 }
 
 func (t *productCatalog) ActivateProductPlan(plan v1.Interface) {

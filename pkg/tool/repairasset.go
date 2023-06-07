@@ -29,9 +29,9 @@ func NewTool(cfg *Config) Tool {
 	utillog.GlobalLoggerConfig.Level(cfg.Level).
 		Format(cfg.Format).
 		Apply()
-	serviceRegistry := service.NewServiceRegistry(logger, apicClient, cfg.DryRun)
+	serviceRegistry := service.NewServiceRegistry(logger, apicClient, cfg.ServiceMappingFile, cfg.DryRun)
 	assetCatalog := service.NewAssetCatalog(logger, serviceRegistry, apicClient, cfg.DryRun)
-	productCatalog := service.NewProductCatalog(logger, apicClient, cfg.DryRun)
+	productCatalog := service.NewProductCatalog(logger, assetCatalog, apicClient, cfg.DryRun)
 	return &tool{
 		logger:          logger,
 		cfg:             cfg,

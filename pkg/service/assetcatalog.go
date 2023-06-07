@@ -17,23 +17,26 @@ type AssetCatalog interface {
 	WriteAssets()
 	RepairAsset()
 	PostRepairAsset()
+	FindAssetResource(logger *logrus.Entry, nameWithScope string) string
 }
 
 type assetCatalog struct {
-	logger          *logrus.Logger
-	apicClient      apic.Client
-	Assets          map[string]AssetInfo
-	serviceRegistry ServiceRegistry
-	dryRun          bool
+	logger            *logrus.Logger
+	apicClient        apic.Client
+	Assets            map[string]AssetInfo
+	AssetResourcesMap map[string]string
+	serviceRegistry   ServiceRegistry
+	dryRun            bool
 }
 
 func NewAssetCatalog(logger *logrus.Logger, serviceRegistry ServiceRegistry, apicClient apic.Client, dryRun bool) AssetCatalog {
 	return &assetCatalog{
-		logger:          logger,
-		apicClient:      apicClient,
-		Assets:          make(map[string]AssetInfo),
-		serviceRegistry: serviceRegistry,
-		dryRun:          dryRun,
+		logger:            logger,
+		apicClient:        apicClient,
+		Assets:            make(map[string]AssetInfo),
+		AssetResourcesMap: make(map[string]string),
+		serviceRegistry:   serviceRegistry,
+		dryRun:            dryRun,
 	}
 }
 
@@ -70,7 +73,7 @@ func (t *assetCatalog) ReadAssets() error {
 		t.Assets[asset.GetMetadata().ID] = assetInfo
 		for _, assetDeletedRef := range ca.Metadata.DeletedReferences {
 			if assetDeletedRef.Kind == management.APIServiceGVK().Kind {
-				if svc := t.serviceRegistry.GetAPIService(assetDeletedRef.ScopeName, assetDeletedRef.Name); svc == nil {
+				if svc := t.serviceRegistry.FindService(logger, assetDeletedRef.ScopeName, assetDeletedRef.Name); svc == nil {
 					logger.
 						WithField("apiServiceScopeName", assetDeletedRef.ScopeName).
 						WithField("apiServiceName", assetDeletedRef.Name).
@@ -81,7 +84,7 @@ func (t *assetCatalog) ReadAssets() error {
 		}
 	}
 
-	if !serviceReferencesFound {
+	if !serviceReferencesFound && !t.serviceRegistry.IsUsingMapping() {
 		return fmt.Errorf("unable to identify the APIService associated to the assets")
 	}
 	return nil
@@ -135,23 +138,23 @@ func (t *assetCatalog) readAssetReleases(logger *logrus.Entry, assetID string) m
 	return assetReleaseInfos
 }
 
-func (t *assetCatalog) readAssetResources(logger *logrus.Entry, assetRelease, scope string) map[string]AssetResourceInfo {
+func (t *assetCatalog) readAssetResources(logger *logrus.Entry, scopeName, scopeKind string) map[string]AssetResourceInfo {
 	assetResourceInfos := make(map[string]AssetResourceInfo)
-	a, _ := catalog.NewAssetResource("", scope, assetRelease)
-	assetReleaseResources, err := t.apicClient.GetAPIV1ResourceInstances(nil, a.GetKindLink())
+	a, _ := catalog.NewAssetResource("", scopeKind, scopeName)
+	assetResources, err := t.apicClient.GetAPIV1ResourceInstances(nil, a.GetKindLink())
 	if err != nil {
 		logger.WithError(err).Error("unable to read asset resources")
 		return assetResourceInfos
 	}
-	for _, assetReleaseResource := range assetReleaseResources {
-		ar, _ := catalog.NewAssetResource("", scope, "")
-		ar.FromInstance(assetReleaseResource)
+	for _, assetResource := range assetResources {
+		ar, _ := catalog.NewAssetResource("", scopeKind, "")
+		ar.FromInstance(assetResource)
 		assetResourceInfo := AssetResourceInfo{
 			AssetResource: ar,
 		}
 
 		assetResourceInfos[ar.Metadata.ID] = assetResourceInfo
-
+		t.AssetResourcesMap[assetResourceMapKey(scopeName, ar.Name)] = assetResourceMapKey(scopeName, ar.Name)
 		logger.
 			WithField("assetResource", ar.Name).
 			WithField("assetResourceStatus", ar.Spec.Status).
@@ -161,6 +164,14 @@ func (t *assetCatalog) readAssetResources(logger *logrus.Entry, assetRelease, sc
 	}
 
 	return assetResourceInfos
+}
+
+func assetResourceMapKey(scopeName, assetResourceName string) string {
+	return fmt.Sprintf("%s/%s", scopeName, assetResourceName)
+}
+
+func (t *assetCatalog) FindAssetResource(logger *logrus.Entry, nameWithScope string) string {
+	return t.AssetResourcesMap[nameWithScope]
 }
 
 func (t *assetCatalog) RepairAsset() {
@@ -256,6 +267,8 @@ func (t *assetCatalog) deleteAssetResources(logger *logrus.Entry, asset AssetInf
 			if err != nil {
 				logger.WithError(err).Error("Unable to delete the corrupted asset resource")
 			}
+			key := assetResourceMapKey(asset.Asset.Name, assetResource.AssetResource.Name)
+			delete(t.AssetResourcesMap, key)
 		}
 	}
 }
@@ -275,24 +288,74 @@ func (t *assetCatalog) recreateAssetMapping(logger *logrus.Entry, asset AssetInf
 
 func (t *assetCatalog) createAssetMapping(logger *logrus.Entry, assetName string, assetSvcRef v1.Reference) {
 	logger = logger.WithField("apiService", assetSvcRef.Name)
-	logger.Info("Creating asset mapping")
+	svc := t.serviceRegistry.FindService(logger, assetSvcRef.ScopeName, assetSvcRef.Name)
+	if svc != nil {
+		logger.Info("Creating asset mapping")
+		am := catalog.NewAssetMapping("", assetName)
 
-	am := catalog.NewAssetMapping("", assetName)
-	am.Spec.Inputs.ApiService = assetSvcRef.Group + "/" + assetSvcRef.ScopeName + "/" + assetSvcRef.Name
-	am.Spec.Inputs.Stage = "default"
-	ri, err := am.AsInstance()
-	if !t.dryRun {
-		ri, err = t.apicClient.CreateResourceInstance(am)
-		if err != nil {
-			logger.WithError(err).Error("unable to create new asset mapping")
+		am.Spec.Inputs.ApiService = assetSvcRef.Group + "/" + svc.Metadata.Scope.Name + "/" + svc.Name
+		am.Spec.Inputs.Stage = "default"
+		ri, err := am.AsInstance()
+		if !t.dryRun {
+			ri, err = t.apicClient.CreateResourceInstance(am)
+			if err != nil {
+				logger.WithError(err).Error("unable to create new asset mapping")
+			}
+		}
+		if err == nil {
+			// wait for asset resource
+			am := t.waitForAssetMappingStatus(ri.Name, assetName, svc.Name)
+			if am != nil {
+				refName := am.Status.Outputs[0].Resource.AssetResource.Ref
+				element := strings.Split(refName, "/")
+				t.AssetResourcesMap[assetResourceMapKey(assetName, svc.Name)] = assetResourceMapKey(assetName, element[2])
+			}
+			logger = logger.
+				WithField("newAssetMappingID", ri.Metadata.ID).
+				WithField("newAssetMappingName", ri.Name)
+			logger.Info("Created asset mapping")
 		}
 	}
-	if err == nil {
-		logger = logger.
-			WithField("newAssetMappingID", ri.Metadata.ID).
-			WithField("newAssetMappingName", ri.Name)
-		logger.Info("Created asset mapping")
+}
+
+func (t *assetCatalog) waitForAssetMappingStatus(assetMappingName, assetName, svcName string) *catalog.AssetMapping {
+	if t.dryRun {
+		return &catalog.AssetMapping{Status: catalog.AssetMappingStatus{
+			Outputs: []catalog.AssetMappingStatusOutputs{
+				{
+					Resource: catalog.AssetMappingStatusResource{
+						AssetResource: catalog.AssetMappingStatusResourceAssetResource{
+							Ref: fmt.Sprintf("catalog/%s/%s", assetName, svcName),
+						},
+					},
+				},
+			},
+		}}
 	}
+	n := 0
+	for updatedAssetMapping := t.getAssetMapping(assetMappingName, assetName); n < 5; {
+		if updatedAssetMapping != nil {
+			return updatedAssetMapping
+		}
+		updatedAssetMapping = t.getAssetMapping(assetMappingName, assetName)
+
+		n++
+		time.Sleep(time.Second)
+	}
+	return nil
+}
+
+func (t *assetCatalog) getAssetMapping(assetMappingName, assetName string) *catalog.AssetMapping {
+	a := catalog.NewAssetMapping(assetMappingName, assetName)
+	ri, err := t.apicClient.GetResource(a.GetSelfLink())
+	if err == nil {
+		am := catalog.NewAssetMapping("", assetName)
+		am.FromInstance(ri)
+		if len(am.Status.Outputs) != 0 {
+			return am
+		}
+	}
+	return nil
 }
 
 func (t *assetCatalog) setAssetToDraft(logger *logrus.Entry, asset AssetInfo) error {
@@ -342,6 +405,7 @@ func (t *assetCatalog) deprecatePreviousAssetRelease(logger *logrus.Entry, asset
 					logger.WithError(statusErr).Error("error deprecating AssetRelease")
 					break
 				}
+				releaseTag.State = string(catalog.AssetStateDEPRECATED)
 			}
 		}
 	}
