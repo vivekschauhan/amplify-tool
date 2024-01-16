@@ -3,13 +3,17 @@ package cmd
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Axway/agent-sdk/pkg/cmd"
 	"github.com/Axway/agent-sdk/pkg/config"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
+	"github.com/vivekschauhan/amplify-tool/pkg/tools"
 )
+
+var cfg = &tools.Config{}
 
 // NewRootCmd creates a new cobra.Command
 func NewRootCmd() *cobra.Command {
@@ -21,21 +25,21 @@ func NewRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{Use: ""}
 	rootCmd.AddCommand(newRepairCmd())
 	rootCmd.AddCommand(newRepairProductCmd())
+	rootCmd.AddCommand(newDuplicateCmd())
 	return rootCmd
 }
 
-func initViperConfig(cmd *cobra.Command) error {
+func initViperConfig(cmd *cobra.Command) (*viper.Viper, error) {
 	v := viper.New()
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 	bindFlagsToViperConfig(cmd, v)
-
 	err := v.Unmarshal(cfg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return v, setupURLs()
 }
 
 // bindFlagsToViperConfig - For each flag, look up its corresponding env var, and use the env var if the flag is not set.
@@ -54,4 +58,46 @@ func bindFlagsToViperConfig(cmd *cobra.Command, v *viper.Viper) {
 			}
 		}
 	})
+}
+
+func baseFlags(cmd *cobra.Command) {
+	cmd.Flags().String("org_id", "", "The Amplify org ID")
+	cmd.MarkFlagRequired("org_id")
+	cmd.Flags().String("region", "us", "The central region (us, eu, apac)")
+	cmd.Flags().String("url", "", "The central URL")
+	cmd.Flags().String("platform_url", "", "The platform URL")
+
+	cmd.Flags().String("auth.private_key", "./private_key.pem", "The private key associated with service account(default : ./private_key.pem)")
+	cmd.Flags().String("auth.public_key", "./public_key.pem", "The public key associated with service account(default : ./public_key.pem)")
+	cmd.Flags().String("auth.key_password", "", "The password for private key")
+	cmd.Flags().String("auth.url", "", "The AxwayID auth URL")
+	cmd.Flags().String("auth.client_id", "", "The service account client ID")
+	cmd.MarkFlagRequired("auth.client_id")
+	cmd.Flags().Duration("auth.timeout", 10*time.Second, "The connection timeout for AxwayID")
+	cmd.Flags().String("log_level", "info", "log level")
+	cmd.Flags().String("log_format", "json", "line or json")
+}
+
+func setupURLs() error {
+	url := "https://apicentral.axway.com"
+	platURL := "https://platform.axway.com"
+	authURL := "https://login.axway.com/auth"
+	if strings.ToLower(cfg.Region) == "eu" {
+		url = "https://central.eu-fr.axway.com"
+	} else if strings.ToLower(cfg.Region) == "apac" {
+		url = "https://central.ap-sg.axway.com"
+	} else if strings.ToLower(cfg.Region) == "us" {
+	} else {
+		return fmt.Errorf("region is not valid (us,eu,apac)")
+	}
+	if cfg.URL == "" {
+		cfg.URL = url
+	}
+	if cfg.PlatformURL == "" {
+		cfg.PlatformURL = platURL
+	}
+	if cfg.Auth.URL == "" {
+		cfg.Auth.URL = authURL
+	}
+	return nil
 }
