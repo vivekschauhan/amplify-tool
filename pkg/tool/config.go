@@ -15,4 +15,5 @@ type Config struct {
 	Format             string      `mapstructure:"log_format"`
 	DryRun             bool        `mapstructure:"dry_run"`
 	ServiceMappingFile string      `mapstructure:"service_mapping_file"`
+	ProductCatalogFile string      `mapstructure:"product_catalog_file"`
 }

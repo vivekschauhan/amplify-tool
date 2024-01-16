@@ -20,6 +20,7 @@ func NewRootCmd() *cobra.Command {
 
 	rootCmd := &cobra.Command{Use: ""}
 	rootCmd.AddCommand(newRepairCmd())
+	rootCmd.AddCommand(newRepairProductCmd())
 	return rootCmd
 }
 

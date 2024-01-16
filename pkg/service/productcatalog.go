@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -17,23 +18,28 @@ type ProductCatalog interface {
 	WriteProducts()
 	PreProcessProductForAssetRepair()
 	PostProcessProductForAssetRepair()
+	RepairProductWithBackup()
 }
 
 type productCatalog struct {
-	logger       *logrus.Logger
-	apicClient   apic.Client
-	Products     map[string]ProductInfo
-	assetCatalog AssetCatalog
-	dryRun       bool
+	logger         *logrus.Logger
+	apicClient     apic.Client
+	Products       map[string]ProductInfo
+	ProductsBackup map[string]ProductInfo
+	backupFile     string
+	assetCatalog   AssetCatalog
+	dryRun         bool
 }
 
-func NewProductCatalog(logger *logrus.Logger, assetCatalog AssetCatalog, apicClient apic.Client, dryRun bool) ProductCatalog {
+func NewProductCatalog(logger *logrus.Logger, assetCatalog AssetCatalog, apicClient apic.Client, backupFile string, dryRun bool) ProductCatalog {
 	return &productCatalog{
-		logger:       logger,
-		apicClient:   apicClient,
-		Products:     make(map[string]ProductInfo),
-		assetCatalog: assetCatalog,
-		dryRun:       dryRun,
+		logger:         logger,
+		apicClient:     apicClient,
+		Products:       make(map[string]ProductInfo),
+		ProductsBackup: make(map[string]ProductInfo),
+		backupFile:     backupFile,
+		assetCatalog:   assetCatalog,
+		dryRun:         dryRun,
 	}
 }
 
@@ -510,9 +516,6 @@ func (t *productCatalog) recreatePlan(logger *logrus.Entry, product ProductInfo,
 func (t *productCatalog) recreateQuota(logger *logrus.Entry, existingPlanInfo PlanInfo, newPlanRI *v1.ResourceInstance) bool {
 	quotaCreateError := false
 	logger.Info("Recreating quota for plan")
-	if t.dryRun {
-		return false
-	}
 	for _, quota := range existingPlanInfo.Quotas {
 		newQuota := catalog.NewQuota("", newPlanRI.Name)
 		newQuota.Title = quota.Quota.Title
@@ -527,19 +530,21 @@ func (t *productCatalog) recreateQuota(logger *logrus.Entry, existingPlanInfo Pl
 				Error("unable to recreate quota, no asset resources were found")
 			return false
 		}
-		newQuotaRI, err := t.apicClient.CreateResourceInstance(newQuota)
-		if err != nil {
-			logger.
-				WithField("quotaName", quota.Quota.Name).
-				WithField("planName", newPlanRI.Name).
-				WithError(err).
-				Errorf("unable to recreate quota")
-			quotaCreateError = true
-		} else {
-			t.logger.Infof("Recreated quota id:%s, name: %s, plan: %s",
-				newQuotaRI.Metadata.ID,
-				newQuotaRI.Name,
-				newPlanRI.Name)
+		if !t.dryRun {
+			newQuotaRI, err := t.apicClient.CreateResourceInstance(newQuota)
+			if err != nil {
+				logger.
+					WithField("quotaName", quota.Quota.Name).
+					WithField("planName", newPlanRI.Name).
+					WithError(err).
+					Errorf("unable to recreate quota")
+				quotaCreateError = true
+			} else {
+				t.logger.Infof("Recreated quota id:%s, name: %s, plan: %s",
+					newQuotaRI.Metadata.ID,
+					newQuotaRI.Name,
+					newPlanRI.Name)
+			}
 		}
 	}
 	return quotaCreateError
@@ -576,6 +581,84 @@ func (t *productCatalog) ActivateProductPlan(plan v1.Interface) {
 		statusErr := t.apicClient.CreateSubResource(planRI.ResourceMeta, map[string]interface{}{"state": catalog.ProductPlanStateACTIVE})
 		if statusErr != nil {
 			t.logger.WithError(statusErr).Error("error activating plan")
+		}
+	}
+}
+
+func (t *productCatalog) LoadProducts() {
+	readFromFile(t.logger, t.backupFile, &t.ProductsBackup)
+}
+
+func (t *productCatalog) RepairProductWithBackup() {
+	if t.backupFile == "" {
+		return
+	}
+	log.Println("Loading product catalog from backup")
+	t.LoadProducts()
+	for _, product := range t.Products {
+		logger := t.logger.
+			WithField("productID", product.Product.Metadata.ID).
+			WithField("productName", product.Product.Name)
+		backupProduct := t.ProductsBackup[product.Product.Metadata.ID]
+		lastBackupProductRelease := t.getPreRepairLastRelease(backupProduct)
+		lastProductRelease := t.getPreRepairLastRelease(product)
+		fixedWithPlan := false
+		if len(backupProduct.PlansWithNoRelease) != 0 {
+			if len(product.PlansWithNoRelease) != len(backupProduct.PlansWithNoRelease) {
+				logger.Info("found difference in product plans from backup")
+				t.fixProductWithBackup(logger, product, nil, backupProduct.PlansWithNoRelease)
+				fixedWithPlan = true
+			}
+		} else {
+			if len(lastProductRelease.Plans) != len(lastBackupProductRelease.Plans) {
+				logger.Info("found difference in product plans from backup")
+				var releaseTagRI *v1.ResourceInstance
+				if lastProductRelease.ReleaseTag != nil {
+					releaseTagRI, _ = lastProductRelease.ReleaseTag.AsInstance()
+				}
+				t.fixProductWithBackup(logger, product, releaseTagRI, lastBackupProductRelease.Plans)
+				fixedWithPlan = true
+			}
+		}
+		if !fixedWithPlan && product.Product.Status != nil && product.Product.Status.Level == "Error" {
+			t.fixProductWithBackup(logger, product, nil, nil)
+		}
+	}
+}
+
+func (t *productCatalog) fixProductWithBackup(logger *logrus.Entry, product ProductInfo, lastReleaseTagRI *v1.ResourceInstance, plansToCreate map[string]PlanInfo) {
+	var err error
+	createReleaseTag := false
+	if lastReleaseTagRI == nil {
+		createReleaseTag = true
+	} else {
+		if product.Product.State == catalog.ProductStateDRAFT {
+			createReleaseTag = true
+		} else {
+			if product.Product.Status != nil && product.Product.Status.Level == "Error" {
+				createReleaseTag = true
+			}
+		}
+	}
+
+	if createReleaseTag {
+		lastReleaseTagRI, err = t.createReleaseTag(logger, product)
+		if err == nil {
+			t.waitForProductRelease(lastReleaseTagRI.Metadata.ID)
+		}
+	}
+
+	for _, plan := range plansToCreate {
+		newPlanRI, err := t.recreatePlan(logger, product, plan, lastReleaseTagRI)
+		if err == nil {
+			logger := logger.
+				WithField("newProductPlanID", newPlanRI.Metadata.ID).
+				WithField("newProductPlanName", newPlanRI.Name)
+			logger.Infof("Recreated product plan")
+			quotaCreateError := t.recreateQuota(logger, plan, newPlanRI)
+			if !quotaCreateError && plan.Plan.State == catalog.ProductPlanStateACTIVE {
+				t.ActivateProductPlan(newPlanRI)
+			}
 		}
 	}
 }

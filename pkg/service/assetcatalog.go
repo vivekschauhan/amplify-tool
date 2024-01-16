@@ -13,7 +13,7 @@ import (
 )
 
 type AssetCatalog interface {
-	ReadAssets() error
+	ReadAssets(repairProduct bool) error
 	WriteAssets()
 	RepairAsset()
 	PostRepairAsset()
@@ -44,7 +44,7 @@ func (t *assetCatalog) WriteAssets() {
 	saveToFile(t.logger, "asset-catalog", t.Assets)
 }
 
-func (t *assetCatalog) ReadAssets() error {
+func (t *assetCatalog) ReadAssets(repairProduct bool) error {
 	t.logger.Info("Reading Assets...")
 	a := catalog.NewAsset("")
 	assets, err := t.apicClient.GetAPIV1ResourceInstances(nil, a.GetKindLink())
@@ -63,22 +63,26 @@ func (t *assetCatalog) ReadAssets() error {
 		}
 		logger.Info("Reading Asset ok")
 		assetResources := t.readAssetResources(logger, ca.Name, catalog.AssetGVK().Kind)
-		assetReleases := t.readAssetReleases(logger, asset.GetMetadata().ID)
 		assetInfo := AssetInfo{
 			Asset:                    ca,
 			DeletedServiceReferences: make([]v1.Reference, 0),
 			AssetResources:           assetResources,
-			AssetReleases:            assetReleases,
+		}
+		if !repairProduct {
+			assetReleases := t.readAssetReleases(logger, asset.GetMetadata().ID)
+			assetInfo.AssetReleases = assetReleases
 		}
 		t.Assets[asset.GetMetadata().ID] = assetInfo
-		for _, assetDeletedRef := range ca.Metadata.DeletedReferences {
-			if assetDeletedRef.Kind == management.APIServiceGVK().Kind {
-				if svc := t.serviceRegistry.FindService(logger, assetDeletedRef.ScopeName, assetDeletedRef.Name); svc == nil {
-					logger.
-						WithField("apiServiceScopeName", assetDeletedRef.ScopeName).
-						WithField("apiServiceName", assetDeletedRef.Name).
-						Error("unable to find the APIService associated to asset")
-					serviceReferencesFound = false
+		if !repairProduct {
+			for _, assetDeletedRef := range ca.Metadata.DeletedReferences {
+				if assetDeletedRef.Kind == management.APIServiceGVK().Kind {
+					if svc := t.serviceRegistry.FindService(logger, assetDeletedRef.ScopeName, assetDeletedRef.Name); svc == nil {
+						logger.
+							WithField("apiServiceScopeName", assetDeletedRef.ScopeName).
+							WithField("apiServiceName", assetDeletedRef.Name).
+							Error("unable to find the APIService associated to asset")
+						serviceReferencesFound = false
+					}
 				}
 			}
 		}

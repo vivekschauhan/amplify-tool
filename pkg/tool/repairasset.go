@@ -12,6 +12,7 @@ import (
 
 type Tool interface {
 	Run() error
+	RunRepairProduct() error
 }
 
 type tool struct {
@@ -31,7 +32,7 @@ func NewTool(cfg *Config) Tool {
 		Apply()
 	serviceRegistry := service.NewServiceRegistry(logger, apicClient, cfg.ServiceMappingFile, cfg.DryRun)
 	assetCatalog := service.NewAssetCatalog(logger, serviceRegistry, apicClient, cfg.DryRun)
-	productCatalog := service.NewProductCatalog(logger, assetCatalog, apicClient, cfg.DryRun)
+	productCatalog := service.NewProductCatalog(logger, assetCatalog, apicClient, cfg.ProductCatalogFile, cfg.DryRun)
 	return &tool{
 		logger:          logger,
 		cfg:             cfg,
@@ -71,14 +72,14 @@ func (t *tool) Run() error {
 	}
 	t.productCatalog.PreProcessProductForAssetRepair()
 	t.assetCatalog.RepairAsset()
-	t.productCatalog.PostProcessProductForAssetRepair()
+	//t.productCatalog.PostProcessProductForAssetRepair()
 	t.assetCatalog.PostRepairAsset()
 	return nil
 }
 
 func (t *tool) Read() error {
 	t.serviceRegistry.ReadServices()
-	err := t.assetCatalog.ReadAssets()
+	err := t.assetCatalog.ReadAssets(false)
 	t.productCatalog.ReadProducts()
 	if err != nil {
 		return err
