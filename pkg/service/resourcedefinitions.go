@@ -7,20 +7,16 @@ import (
 )
 
 type APIServiceInfo struct {
-	APIService          *management.APIService            `json:"apiService,omitempty"`
-	APIServiceRevisions map[string]APIServiceRevisionInfo `json:"apiServiceRevisions,omitempty"`
-}
-
-type APIServiceRevisionInfo struct {
-	APIServiceRevision  *management.APIServiceRevision            `json:"apiServiceRevision,omitempty"`
+	APIService          *management.APIService                    `json:"apiService,omitempty"`
+	APIServiceRevisions map[string]*management.APIServiceRevision `json:"apiServiceRevisions,omitempty"`
 	APIServiceInstances map[string]*management.APIServiceInstance `json:"apiServiceInstances,omitempty"`
 }
-
 type AssetInfo struct {
 	Asset                    *catalog.Asset               `json:"asset,omitempty"`
 	DeletedServiceReferences []v1.Reference               `json:"deletedServiceReferences,omitempty"`
 	AssetResources           map[string]AssetResourceInfo `json:"assetResources,omitempty"`
 	AssetReleases            map[string]AssetReleaseInfo  `json:"assetReleases,omitempty"`
+	AssetMappings            []*v1.ResourceInstance
 }
 
 type AssetReleaseInfo struct {

@@ -16,6 +16,7 @@ type Config struct {
 	Auth        auth.Config `mapstructure:"auth"`
 	Level       string      `mapstructure:"log_level"`
 	Format      string      `mapstructure:"log_format"`
+	DryRun      bool        `mapstructure:"dry_run"`
 }
 
 func CreateAPICClient(cfg *Config) apic.Client {

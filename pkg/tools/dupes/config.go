@@ -7,5 +7,4 @@ import (
 // Config the configuration for the Watch client
 type Config struct {
 	tools.Config
-	DryRun bool `mapstructure:"dry_run"`
 }

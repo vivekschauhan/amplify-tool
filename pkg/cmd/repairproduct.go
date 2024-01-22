@@ -39,7 +39,6 @@ func initRepairProductCmdFlags(cmd *cobra.Command) {
 	baseFlags(cmd)
 	cmd.Flags().String("service_mapping_file", "", "The path of the service mapping file")
 	cmd.Flags().String("product_catalog_file", "", "The path of the product-catalog.json")
-	cmd.Flags().Bool("dry_run", false, "Run the tool with no update(true/false)")
 }
 
 func runRepairProduct(_ *cobra.Command, _ []string) error {

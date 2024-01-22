@@ -14,12 +14,11 @@ type Tool interface {
 }
 
 type tool struct {
-	apicClient      apic.Client
-	cfg             *Config
-	logger          *logrus.Logger
-	productCatalog  service.ProductCatalog
-	assetCatalog    service.AssetCatalog
-	serviceRegistry service.ServiceRegistry
+	apicClient     apic.Client
+	cfg            *Config
+	logger         *logrus.Logger
+	productCatalog service.ProductCatalog
+	assetCatalog   service.AssetCatalog
 }
 
 func NewTool(cfg *Config) Tool {
@@ -28,16 +27,15 @@ func NewTool(cfg *Config) Tool {
 	utillog.GlobalLoggerConfig.Level(cfg.Level).
 		Format(cfg.Format).
 		Apply()
-	serviceRegistry := service.NewServiceRegistry(logger, apicClient, cfg.ServiceMappingFile, cfg.DryRun)
-	assetCatalog := service.NewAssetCatalog(logger, serviceRegistry, apicClient, cfg.DryRun)
+	serviceRegistry := service.NewServiceRegistry(logger, apicClient, cfg.DryRun, service.WithMappingFile(cfg.ServiceMappingFile))
+	assetCatalog := service.NewAssetCatalog(logger, apicClient, cfg.DryRun, serviceRegistry)
 	productCatalog := service.NewProductCatalog(logger, assetCatalog, apicClient, cfg.ProductCatalogFile, cfg.DryRun)
 	return &tool{
-		logger:          logger,
-		cfg:             cfg,
-		apicClient:      apicClient,
-		serviceRegistry: serviceRegistry,
-		assetCatalog:    assetCatalog,
-		productCatalog:  productCatalog,
+		logger:         logger,
+		cfg:            cfg,
+		apicClient:     apicClient,
+		assetCatalog:   assetCatalog,
+		productCatalog: productCatalog,
 	}
 }
 

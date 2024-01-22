@@ -26,6 +26,8 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(newRepairCmd())
 	rootCmd.AddCommand(newRepairProductCmd())
 	rootCmd.AddCommand(newDuplicateCmd())
+	rootCmd.AddCommand(newExportCmd())
+	rootCmd.AddCommand(newImportCmd())
 	return rootCmd
 }
 
@@ -76,6 +78,7 @@ func baseFlags(cmd *cobra.Command) {
 	cmd.Flags().Duration("auth.timeout", 10*time.Second, "The connection timeout for AxwayID")
 	cmd.Flags().String("log_level", "info", "log level")
 	cmd.Flags().String("log_format", "json", "line or json")
+	cmd.Flags().Bool("dry_run", false, "Run the tool with no update(true/false)")
 }
 
 func setupURLs() error {

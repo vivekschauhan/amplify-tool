@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Axway/agent-sdk/pkg/apic"
@@ -12,44 +13,175 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type assetCatalogOpt func(s *assetCatalog)
+
 type AssetCatalog interface {
 	ReadAssets(repairProduct bool) error
 	WriteAssets()
+	GetAssetOutput() []v1.Interface
 	RepairAsset()
 	PostRepairAsset()
+	GetAssetInfo(logger *logrus.Entry, id string) AssetInfo
 	FindAssetResource(logger *logrus.Entry, nameWithScope string) string
+	AssetsForInstance(group, env, instance string) []string
 }
 
 type assetCatalog struct {
-	logger            *logrus.Logger
-	apicClient        apic.Client
-	Assets            map[string]AssetInfo
-	AssetResourcesMap map[string]string
-	serviceRegistry   ServiceRegistry
-	dryRun            bool
+	logger                *logrus.Logger
+	apicClient            apic.Client
+	Assets                map[string]AssetInfo
+	AssetResourcesMap     map[string]string
+	InstanceToResourceMap map[string][]string
+	serviceRegistry       ServiceRegistry
+	filterUsingRegistry   bool
+	assetRelRes           bool
+	forExport             bool
+	stripData             bool
+	dryRun                bool
 }
 
-func NewAssetCatalog(logger *logrus.Logger, serviceRegistry ServiceRegistry, apicClient apic.Client, dryRun bool) AssetCatalog {
-	return &assetCatalog{
-		logger:            logger,
-		apicClient:        apicClient,
-		Assets:            make(map[string]AssetInfo),
-		AssetResourcesMap: make(map[string]string),
-		serviceRegistry:   serviceRegistry,
-		dryRun:            dryRun,
+func NewAssetCatalog(logger *logrus.Logger, apicClient apic.Client, dryRun bool, serviceRegistry ServiceRegistry, opt ...assetCatalogOpt) AssetCatalog {
+	a := &assetCatalog{
+		logger:                logger,
+		apicClient:            apicClient,
+		Assets:                make(map[string]AssetInfo),
+		AssetResourcesMap:     make(map[string]string),
+		InstanceToResourceMap: make(map[string][]string),
+		serviceRegistry:       serviceRegistry,
+		dryRun:                dryRun,
+	}
+
+	for _, o := range opt {
+		o(a)
+	}
+
+	return a
+}
+
+func WithFilterUsingRegistry() assetCatalogOpt {
+	return func(a *assetCatalog) {
+		a.filterUsingRegistry = true
+	}
+}
+
+func WithAssetReleaseResources() assetCatalogOpt {
+	return func(a *assetCatalog) {
+		a.assetRelRes = true
+	}
+}
+
+func ForExport() assetCatalogOpt {
+	return func(a *assetCatalog) {
+		a.forExport = true
+	}
+}
+
+func StripData() assetCatalogOpt {
+	return func(a *assetCatalog) {
+		a.stripData = true
 	}
 }
 
 func (t *assetCatalog) WriteAssets() {
-	saveToFile(t.logger, "asset-catalog", t.Assets)
+	SaveToFile(t.logger, "asset-catalog", "asset-catalog.json", t.Assets)
+}
+
+func (t *assetCatalog) GetAssetOutput() []v1.Interface {
+	objs := []v1.Interface{}
+	for _, assetInfo := range t.Assets {
+		objs = append(objs, assetInfo.Asset)
+		for _, mpng := range assetInfo.AssetMappings {
+			objs = append(objs, mpng)
+		}
+	}
+
+	// clean data
+	if t.stripData {
+		cleanObjs := []v1.Interface{}
+		wg := sync.WaitGroup{}
+		wg.Add(len(objs))
+		for _, obj := range objs {
+			func(i v1.Interface) {
+				defer wg.Done()
+				ri, _ := i.AsInstance()
+
+				// clean sub resources by kind
+				switch ri.Kind {
+				case catalog.AssetMappingGVK().Kind:
+					delete(ri.SubResources, "status")
+				case catalog.AssetGVK().Kind:
+					delete(ri.SubResources, "state")
+					delete(ri.SubResources, "latestrelease")
+					delete(ri.SubResources, "references")
+					delete(ri.SubResources, "access")
+				}
+
+				ri.Metadata.Audit = v1.AuditMetadata{}
+				ri.Metadata.References = []v1.Reference{}
+				ri.Metadata.ID = ""
+				ri.Metadata.ResourceVersion = ""
+				ri.Metadata.Scope.ID = ""
+				ri.Metadata.Scope.SelfLink = ""
+				ri.Metadata.SelfLink = ""
+				ri.Owner = nil
+				ri.Tags = []string{}
+				ri.Attributes = map[string]string{}
+				ri.Finalizers = make([]v1.Finalizer, 0)
+				cleanObjs = append(cleanObjs, ri)
+			}(obj)
+		}
+		wg.Wait()
+		objs = cleanObjs
+	}
+	return objs
 }
 
 func (t *assetCatalog) ReadAssets(repairProduct bool) error {
 	t.logger.Info("Reading Assets...")
 	a := catalog.NewAsset("")
-	assets, err := t.apicClient.GetAPIV1ResourceInstances(nil, a.GetKindLink())
-	if err != nil {
-		t.logger.WithError(err).Error("unable to read assets")
+	assets := []*v1.ResourceInstance{}
+	validEnvs := map[string]struct{}{}
+	if t.filterUsingRegistry {
+		wg := sync.WaitGroup{}
+		aMutex := sync.Mutex{}
+		wg.Add(len(t.serviceRegistry.GetEnvs()))
+		for _, d := range t.serviceRegistry.GetEnvs() {
+			validEnvs[d] = struct{}{}
+			go func(env string) {
+				defer wg.Done()
+				params := map[string]string{
+					"query": fmt.Sprintf("metadata.references.name==%s", env),
+				}
+				envAssets, err := t.apicClient.GetAPIV1ResourceInstances(params, a.GetKindLink())
+				if err != nil {
+					t.logger.WithError(err).Error("unable to read assets")
+				}
+				aMutex.Lock()
+				defer aMutex.Unlock()
+				assets = append(assets, envAssets...)
+			}(d)
+		}
+		wg.Wait()
+	} else {
+		var err error
+		assets, err = t.apicClient.GetAPIV1ResourceInstances(nil, a.GetKindLink())
+		if err != nil {
+			t.logger.WithError(err).Error("unable to read assets")
+		}
+	}
+	if t.forExport {
+
+		for _, asset := range assets {
+			ca := catalog.NewAsset("")
+			ca.FromInstance(asset)
+			logger := t.logger.
+				WithField("asset", asset.Name)
+			t.Assets[asset.Metadata.ID] = AssetInfo{
+				Asset:         ca,
+				AssetMappings: t.readAssetMappings(logger, asset.Name, validEnvs),
+			}
+		}
+		return nil
 	}
 	serviceReferencesFound := true
 	for _, asset := range assets {
@@ -62,7 +194,7 @@ func (t *assetCatalog) ReadAssets(repairProduct bool) error {
 				WithField("assetStatus", ca.Status.Level)
 		}
 		logger.Info("Reading Asset ok")
-		assetResources := t.readAssetResources(logger, ca.Name, catalog.AssetGVK().Kind)
+		assetResources := t.readAssetResources(logger, ca.Name, catalog.AssetGVK().Kind, ca.Metadata.ID)
 		assetInfo := AssetInfo{
 			Asset:                    ca,
 			DeletedServiceReferences: make([]v1.Reference, 0),
@@ -114,7 +246,10 @@ func (t *assetCatalog) readAssetReleases(logger *logrus.Entry, assetID string) m
 			logger = logger.WithField("assetReleaseStatus", ar.Status.Level)
 		}
 
-		// assetResources := t.readAssetResources(logger, ar.Name, catalog.AssetReleaseGVK().Kind)
+		assetResources := map[string]AssetResourceInfo{}
+		if t.assetRelRes {
+			assetResources = t.readAssetResources(logger, ar.Name, ar.Kind, ar.Metadata.ID)
+		}
 		var releaseTag *catalog.ReleaseTag
 		if refs, ok := ar.References.([]interface{}); ok {
 			for _, reference := range refs {
@@ -132,9 +267,9 @@ func (t *assetCatalog) readAssetReleases(logger *logrus.Entry, assetID string) m
 		}
 		logger.Debug("Reading AssetRelease ok")
 		assetReleaseInfo := AssetReleaseInfo{
-			AssetRelease: ar,
-			ReleaseTag:   releaseTag,
-			// AssetResources: assetResources,
+			AssetRelease:   ar,
+			ReleaseTag:     releaseTag,
+			AssetResources: assetResources,
 		}
 		assetReleaseInfos[ar.Metadata.ID] = assetReleaseInfo
 	}
@@ -142,7 +277,29 @@ func (t *assetCatalog) readAssetReleases(logger *logrus.Entry, assetID string) m
 	return assetReleaseInfos
 }
 
-func (t *assetCatalog) readAssetResources(logger *logrus.Entry, scopeName, scopeKind string) map[string]AssetResourceInfo {
+func (t *assetCatalog) readAssetMappings(logger *logrus.Entry, scopeName string, validEnvs map[string]struct{}) []*v1.ResourceInstance {
+	a := catalog.NewAssetMapping("", scopeName)
+	assetMappings, err := t.apicClient.GetAPIV1ResourceInstances(nil, a.GetKindLink())
+	if err != nil {
+		logger.WithError(err).Error("unable to read asset mappings")
+		return []*v1.ResourceInstance{}
+	}
+	if len(validEnvs) == 0 {
+		return assetMappings
+	}
+
+	filteredMappings := []*v1.ResourceInstance{}
+	for _, ri := range assetMappings {
+		a.FromInstance(ri)
+		env := strings.Split(a.Spec.Inputs.ApiService, "/")[2]
+		if _, found := validEnvs[env]; found {
+			filteredMappings = append(filteredMappings, ri)
+		}
+	}
+	return filteredMappings
+}
+
+func (t *assetCatalog) readAssetResources(logger *logrus.Entry, scopeName, scopeKind, scopeID string) map[string]AssetResourceInfo {
 	assetResourceInfos := make(map[string]AssetResourceInfo)
 	a, _ := catalog.NewAssetResource("", scopeKind, scopeName)
 	assetResources, err := t.apicClient.GetAPIV1ResourceInstances(nil, a.GetKindLink())
@@ -158,7 +315,8 @@ func (t *assetCatalog) readAssetResources(logger *logrus.Entry, scopeName, scope
 		}
 
 		assetResourceInfos[ar.Metadata.ID] = assetResourceInfo
-		t.AssetResourcesMap[assetResourceMapKey(scopeName, ar.Name)] = assetResourceMapKey(scopeName, ar.Name)
+		t.AssetResourcesMap[assetResourceMapKey(scopeName, ar.Name)] = scopeID
+		t.InstanceToResourceMap[ar.References.ApiServiceInstance] = append(t.InstanceToResourceMap[ar.References.ApiServiceInstance], assetResourceMapKey(scopeName, ar.Name))
 		logger.
 			WithField("assetResource", ar.Name).
 			WithField("assetResourceStatus", ar.Spec.Status).
@@ -176,6 +334,21 @@ func assetResourceMapKey(scopeName, assetResourceName string) string {
 
 func (t *assetCatalog) FindAssetResource(logger *logrus.Entry, nameWithScope string) string {
 	return t.AssetResourcesMap[nameWithScope]
+}
+
+func (t *assetCatalog) GetAssetInfo(logger *logrus.Entry, id string) AssetInfo {
+	if i, found := t.Assets[id]; found {
+		return i
+	}
+	return AssetInfo{}
+}
+
+func (t *assetCatalog) AssetsForInstance(group, env, instance string) []string {
+	instancePath := fmt.Sprintf("%s/%s/%s", group, env, instance)
+	if assets, found := t.InstanceToResourceMap[instancePath]; found {
+		return assets
+	}
+	return nil
 }
 
 func (t *assetCatalog) RepairAsset() {

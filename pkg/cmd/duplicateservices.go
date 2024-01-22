@@ -36,7 +36,6 @@ func newDuplicateCmd() *cobra.Command {
 
 func initDuplicateCmdFlags(cmd *cobra.Command) {
 	baseFlags(cmd)
-	cmd.Flags().Bool("dry_run", false, "Run the tool with no update(true/false)")
 }
 
 func runDeduplicate(_ *cobra.Command, _ []string) error {
