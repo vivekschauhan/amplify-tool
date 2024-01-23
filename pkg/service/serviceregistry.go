@@ -34,9 +34,9 @@ type serviceRegistry struct {
 	APIServices     map[string]map[string]APIServiceInfo
 	ServiceMapping  map[string][]string
 	envs            []string
+	envNames        map[string]string
 	mappingFile     string
 	outputFile      string
-	envName         string
 	getAllRevisions bool
 	getInstances    bool
 	stripData       bool
@@ -50,6 +50,7 @@ func NewServiceRegistry(logger *logrus.Logger, apicClient apic.Client, dryRun bo
 		apiSvcLock:     &sync.Mutex{},
 		APIServices:    make(map[string]map[string]APIServiceInfo),
 		ServiceMapping: make(map[string][]string),
+		envNames:       make(map[string]string),
 		dryRun:         dryRun,
 	}
 
@@ -68,7 +69,15 @@ func WithMappingFile(mappingFile string) serviceRegistryOpt {
 
 func WithEnvironment(envName string) serviceRegistryOpt {
 	return func(s *serviceRegistry) {
-		s.envName = envName
+		s.envNames[envName] = envName
+	}
+}
+
+func WithEnvironments(envNames []string) serviceRegistryOpt {
+	return func(s *serviceRegistry) {
+		for _, envName := range envNames {
+			s.envNames[envName] = envName
+		}
 	}
 }
 
@@ -192,32 +201,28 @@ func (t *serviceRegistry) GetEnvs() []string {
 }
 
 func (t *serviceRegistry) ReadServices() {
-	e := management.NewEnvironment(t.envName)
-	eInst, _ := e.AsInstance()
-	envs := []*v1.ResourceInstance{eInst}
-
-	if t.envName == "" {
-		e := management.NewEnvironment("")
-		var err error
-		envs, err = t.apicClient.GetAPIV1ResourceInstances(nil, e.GetKindLink())
-		if err != nil {
-			t.logger.WithError(err).Error("unable to read environments")
-			return
-		}
+	e := management.NewEnvironment("")
+	envs, err := t.apicClient.GetAPIV1ResourceInstances(nil, e.GetKindLink())
+	if err != nil {
+		t.logger.WithError(err).Error("unable to read environments")
+		return
 	}
 
 	t.loadServiceMapping()
 	t.logger.Info("Reading API Service...")
 	wg := sync.WaitGroup{}
 	for _, env := range envs {
-		wg.Add(1)
 		envName := env.GetName()
-		t.envs = append(t.envs, envName)
-		go func(envName string) {
-			defer wg.Done()
-			logger := t.logger.WithField("env", envName)
-			t.readAPIServices(logger, envName)
-		}(envName)
+		_, found := t.envNames[envName]
+		if len(t.envNames) > 0 && found {
+			t.envs = append(t.envs, envName)
+			wg.Add(1)
+			go func(envName string) {
+				defer wg.Done()
+				logger := t.logger.WithField("env", envName)
+				t.readAPIServices(logger, envName)
+			}(envName)
+		}
 	}
 	wg.Wait()
 }

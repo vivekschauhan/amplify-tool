@@ -37,6 +37,13 @@ func NewTool(cfg *Config) Tool {
 		Format(cfg.Format).
 		Apply()
 	serviceRegistry := service.NewServiceRegistry(logger, apicClient, cfg.DryRun, service.WithGetInstances())
+	if len(cfg.Environments) > 0 {
+		envs := strings.Split(cfg.Environments, ",")
+		for i := range envs {
+			envs[i] = strings.Trim(envs[i], " ")
+		}
+		serviceRegistry = service.NewServiceRegistry(logger, apicClient, cfg.DryRun, service.WithGetInstances(), service.WithEnvironments(envs))
+	}
 	assetCatalog := service.NewAssetCatalog(logger, apicClient, cfg.DryRun, serviceRegistry)
 	// productCatalog := service.NewProductCatalog(logger, assetCatalog, apicClient, "", cfg.DryRun)
 	return &tool{

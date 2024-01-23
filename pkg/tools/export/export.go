@@ -30,7 +30,7 @@ func NewTool(cfg *Config) Tool {
 		Apply()
 	serviceRegistry := service.NewServiceRegistry(logger, apicClient, cfg.DryRun,
 		service.WithGetInstances(),
-		service.WithEnvironment(cfg.Environment),
+		service.WithEnvironments([]string{cfg.Environment}),
 		service.WithOutputFile(cfg.OutFile),
 		service.WithIncludeData(false),
 	)
