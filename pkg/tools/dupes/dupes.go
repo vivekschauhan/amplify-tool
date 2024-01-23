@@ -1,6 +1,8 @@
 package dupes
 
 import (
+	"fmt"
+	"os"
 	"strings"
 
 	"github.com/Axway/agent-sdk/pkg/apic"
@@ -24,6 +26,8 @@ type tool struct {
 	serviceRegistry service.ServiceRegistry
 	assetCatalog    service.AssetCatalog
 	// productCatalog  service.ProductCatalog
+	output  []string
+	outfile string
 }
 
 func NewTool(cfg *Config) Tool {
@@ -42,6 +46,8 @@ func NewTool(cfg *Config) Tool {
 		serviceRegistry: serviceRegistry,
 		assetCatalog:    assetCatalog,
 		// productCatalog:  productCatalog,
+		output:  []string{},
+		outfile: cfg.OutFile,
 	}
 }
 
@@ -88,12 +94,23 @@ func (t *tool) findDupes() error {
 			t.handleGroup(logger, env, group)
 		}
 	}
+
+	output := strings.Join(t.output, "\n")
+	if t.outfile == "" {
+		fmt.Print(output)
+	} else {
+		os.WriteFile(t.outfile, []byte(output), 0777)
+	}
 	return nil
 }
 
 func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) {
 	itemToAssets := map[string]int{}
 	totalAssets := 0
+	if len(services) <= 1 {
+		return
+	}
+	t.output = append(t.output, fmt.Sprintf("Found possible duplicate services: %s", strings.Join(services, ", ")))
 	for _, service := range services {
 		svcInfo := t.serviceRegistry.GetAPIServiceInfo(env, service)
 		if svcInfo == nil {
@@ -110,6 +127,23 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 		logger.WithField("svc", service).WithField("assetsPerSvc", itemToAssets[service]).Debug("done finding assets for service")
 	}
 	logger.WithField("asset", itemToAssets).WithField("numAssets", totalAssets).Info("counted assets")
+	svcsWithAssets := 0
+	svcWithAsset := ""
+	for service, assets := range itemToAssets {
+		svcOutput := fmt.Sprintf("%s: %v assets", service, assets)
+		t.output = append(t.output, svcOutput)
+		if assets > 0 {
+			svcWithAsset = service
+			svcsWithAssets++
+		}
+	}
+	if svcsWithAssets == 0 {
+		t.output = append(t.output, fmt.Sprintf("ACTION: For services (%s) combine all revisions to any and remove others", strings.Join(services, ", ")))
+	} else if svcsWithAssets == 1 {
+		t.output = append(t.output, fmt.Sprintf("ACTION: For services (%s) combine all revisions to %s and remove others", strings.Join(services, ", "), svcWithAsset))
+	} else if svcsWithAssets == 2 {
+		t.output = append(t.output, fmt.Sprintf("ACTION: For services (%s) more investigation needed as multiple services have assets", strings.Join(services, ", ")))
+	}
 }
 
 func (t *tool) groupServicesInEnv(env string) map[string][]string {
@@ -127,10 +161,10 @@ func (t *tool) groupServicesInEnv(env string) map[string][]string {
 			details := util.GetAgentDetailStrings(inst)
 			if groupBy == "" {
 				// use the first service to determine if we will group by api id or primary key
-				if _, found := details[definitions.AttrExternalAPIPrimaryKey]; found {
-					groupBy = definitions.AttrExternalAPIPrimaryKey
-				} else if _, found := details[definitions.AttrExternalAPIID]; found {
+				if _, found := details[definitions.AttrExternalAPIID]; found {
 					groupBy = definitions.AttrExternalAPIID
+				} else if _, found := details[definitions.AttrExternalAPIPrimaryKey]; found {
+					groupBy = definitions.AttrExternalAPIPrimaryKey
 				} else {
 					logger.Error("can't determine how to group services")
 					break
@@ -143,6 +177,7 @@ func (t *tool) groupServicesInEnv(env string) map[string][]string {
 					grouping[key] = []string{}
 				}
 				grouping[key] = append(grouping[key], service)
+				break
 			} else {
 				logger.Warn("can't find grouping attribute on service")
 			}

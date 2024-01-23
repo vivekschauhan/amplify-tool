@@ -7,4 +7,5 @@ import (
 // Config the configuration for the Watch client
 type Config struct {
 	tools.Config
+	OutFile string `mapstructure:"out_file"`
 }

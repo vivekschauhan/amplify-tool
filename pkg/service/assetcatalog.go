@@ -32,6 +32,7 @@ type assetCatalog struct {
 	Assets                map[string]AssetInfo
 	AssetResourcesMap     map[string]string
 	InstanceToResourceMap map[string][]string
+	resourceLock          sync.Mutex
 	serviceRegistry       ServiceRegistry
 	filterUsingRegistry   bool
 	assetRelRes           bool
@@ -47,6 +48,7 @@ func NewAssetCatalog(logger *logrus.Logger, apicClient apic.Client, dryRun bool,
 		Assets:                make(map[string]AssetInfo),
 		AssetResourcesMap:     make(map[string]string),
 		InstanceToResourceMap: make(map[string][]string),
+		resourceLock:          sync.Mutex{},
 		serviceRegistry:       serviceRegistry,
 		dryRun:                dryRun,
 	}
@@ -197,41 +199,57 @@ func (t *assetCatalog) ReadAssets(repairProduct bool) error {
 		return nil
 	}
 	serviceReferencesFound := true
-	for _, asset := range assets {
-		ca := catalog.NewAsset("")
-		ca.FromInstance(asset)
-		logger := t.logger.
-			WithField("asset", ca.GetName())
-		if ca.Status != nil {
-			logger = t.logger.
-				WithField("assetStatus", ca.Status.Level)
-		}
-		logger.Info("Reading Asset ok")
-		assetResources := t.readAssetResources(logger, ca.Name, catalog.AssetGVK().Kind, ca.Metadata.ID)
-		assetInfo := AssetInfo{
-			Asset:                    ca,
-			DeletedServiceReferences: make([]v1.Reference, 0),
-			AssetResources:           assetResources,
-		}
-		if !repairProduct {
-			assetReleases := t.readAssetReleases(logger, asset.GetMetadata().ID)
-			assetInfo.AssetReleases = assetReleases
-		}
-		t.Assets[asset.GetMetadata().ID] = assetInfo
-		if !repairProduct {
-			for _, assetDeletedRef := range ca.Metadata.DeletedReferences {
-				if assetDeletedRef.Kind == management.APIServiceGVK().Kind {
-					if svc := t.serviceRegistry.FindService(logger, assetDeletedRef.ScopeName, assetDeletedRef.Name); svc == nil {
-						logger.
-							WithField("apiServiceScopeName", assetDeletedRef.ScopeName).
-							WithField("apiServiceName", assetDeletedRef.Name).
-							Error("unable to find the APIService associated to asset")
-						serviceReferencesFound = false
+
+	limiter := make(chan *v1.ResourceInstance, 25)
+	lock := sync.Mutex{}
+	wg := sync.WaitGroup{}
+	wg.Add(len(assets))
+
+	for _, d := range assets {
+		go func() {
+			defer wg.Done()
+			asset := <-limiter
+
+			ca := catalog.NewAsset("")
+			ca.FromInstance(asset)
+			logger := t.logger.
+				WithField("asset", ca.GetName())
+			if ca.Status != nil {
+				logger = t.logger.
+					WithField("assetStatus", ca.Status.Level)
+			}
+			logger.Info("Reading Asset ok")
+			assetResources := t.readAssetResources(logger, ca.Name, catalog.AssetGVK().Kind, ca.Metadata.ID)
+			assetInfo := AssetInfo{
+				Asset:                    ca,
+				DeletedServiceReferences: make([]v1.Reference, 0),
+				AssetResources:           assetResources,
+			}
+			if !repairProduct {
+				assetReleases := t.readAssetReleases(logger, asset.GetMetadata().ID)
+				assetInfo.AssetReleases = assetReleases
+			}
+			lock.Lock()
+			t.Assets[asset.GetMetadata().ID] = assetInfo
+			lock.Unlock()
+			if !repairProduct {
+				for _, assetDeletedRef := range ca.Metadata.DeletedReferences {
+					if assetDeletedRef.Kind == management.APIServiceGVK().Kind {
+						if svc := t.serviceRegistry.FindService(logger, assetDeletedRef.ScopeName, assetDeletedRef.Name); svc == nil {
+							logger.
+								WithField("apiServiceScopeName", assetDeletedRef.ScopeName).
+								WithField("apiServiceName", assetDeletedRef.Name).
+								Error("unable to find the APIService associated to asset")
+							serviceReferencesFound = false
+						}
 					}
 				}
 			}
-		}
+		}()
+		limiter <- d
 	}
+	wg.Wait()
+	close(limiter)
 
 	if !serviceReferencesFound && !t.serviceRegistry.IsUsingMapping() {
 		return fmt.Errorf("unable to identify the APIService associated to the assets")
@@ -304,8 +322,23 @@ func (t *assetCatalog) readAssetMappings(logger *logrus.Entry, scopeName string,
 	filteredMappings := []*v1.ResourceInstance{}
 	for _, ri := range assetMappings {
 		a.FromInstance(ri)
-		env := strings.Split(a.Spec.Inputs.ApiService, "/")[1]
-		if _, found := validEnvs[env]; found {
+		apiSvcParts := strings.Split(a.Spec.Inputs.ApiService, "/")
+		if _, found := validEnvs[apiSvcParts[1]]; !found {
+			// not part of an env that is being exported
+			continue
+		}
+		apiRevParts := strings.Split(a.Spec.Inputs.ApiServiceRevision, "/")
+		svcInfo := t.serviceRegistry.GetAPIServiceInfo(apiSvcParts[1], apiSvcParts[2])
+
+		// check that the revision is being exported
+		found := false
+		for _, rev := range svcInfo.APIServiceRevisions {
+			if rev.Name == apiRevParts[2] {
+				found = true
+				break
+			}
+		}
+		if found {
 			filteredMappings = append(filteredMappings, ri)
 		}
 	}
@@ -328,8 +361,10 @@ func (t *assetCatalog) readAssetResources(logger *logrus.Entry, scopeName, scope
 		}
 
 		assetResourceInfos[ar.Metadata.ID] = assetResourceInfo
+		t.resourceLock.Lock()
 		t.AssetResourcesMap[assetResourceMapKey(scopeName, ar.Name)] = scopeID
 		t.InstanceToResourceMap[ar.References.ApiServiceInstance] = append(t.InstanceToResourceMap[ar.References.ApiServiceInstance], assetResourceMapKey(scopeName, ar.Name))
+		t.resourceLock.Unlock()
 		logger.
 			WithField("assetResource", ar.Name).
 			WithField("assetResourceStatus", ar.Spec.Status).

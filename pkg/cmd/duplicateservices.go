@@ -36,6 +36,7 @@ func newDuplicateCmd() *cobra.Command {
 
 func initDuplicateCmdFlags(cmd *cobra.Command) {
 	baseFlags(cmd)
+	cmd.Flags().String("out_file", "", "The name of the file to save to")
 }
 
 func runDeduplicate(_ *cobra.Command, _ []string) error {
