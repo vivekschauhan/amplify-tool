@@ -107,13 +107,11 @@ func (t *assetCatalog) GetAssetOutput() []v1.Interface {
 
 				// clean sub resources by kind
 				switch ri.Kind {
-				case catalog.AssetMappingGVK().Kind:
-					delete(ri.SubResources, "status")
 				case catalog.AssetGVK().Kind:
-					delete(ri.SubResources, "state")
-					delete(ri.SubResources, "latestrelease")
-					delete(ri.SubResources, "references")
-					delete(ri.SubResources, "access")
+					a := catalog.NewAsset("")
+					a.FromInstance(ri)
+					a.Icon = struct{}{}
+					ri, _ = a.AsInstance()
 				}
 
 				ri.Metadata.Audit = v1.AuditMetadata{}
@@ -170,17 +168,32 @@ func (t *assetCatalog) ReadAssets(repairProduct bool) error {
 		}
 	}
 	if t.forExport {
+		limiter := make(chan *v1.ResourceInstance, 25)
 
-		for _, asset := range assets {
-			ca := catalog.NewAsset("")
-			ca.FromInstance(asset)
-			logger := t.logger.
-				WithField("asset", asset.Name)
-			t.Assets[asset.Metadata.ID] = AssetInfo{
-				Asset:         ca,
-				AssetMappings: t.readAssetMappings(logger, asset.Name, validEnvs),
-			}
+		lock := sync.Mutex{}
+
+		wg := sync.WaitGroup{}
+		wg.Add(len(assets))
+		for _, d := range assets {
+			go func() {
+				defer wg.Done()
+				in := <-limiter
+
+				ca := catalog.NewAsset("")
+				ca.FromInstance(in)
+				logger := t.logger.WithField("asset", in.Name)
+				lock.Lock()
+				defer lock.Unlock()
+				t.Assets[in.Metadata.ID] = AssetInfo{
+					Asset:         ca,
+					AssetMappings: t.readAssetMappings(logger, in.Name, validEnvs),
+				}
+			}()
+			limiter <- d
 		}
+
+		wg.Wait()
+		close(limiter)
 		return nil
 	}
 	serviceReferencesFound := true
@@ -291,7 +304,7 @@ func (t *assetCatalog) readAssetMappings(logger *logrus.Entry, scopeName string,
 	filteredMappings := []*v1.ResourceInstance{}
 	for _, ri := range assetMappings {
 		a.FromInstance(ri)
-		env := strings.Split(a.Spec.Inputs.ApiService, "/")[2]
+		env := strings.Split(a.Spec.Inputs.ApiService, "/")[1]
 		if _, found := validEnvs[env]; found {
 			filteredMappings = append(filteredMappings, ri)
 		}

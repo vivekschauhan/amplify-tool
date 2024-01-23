@@ -139,19 +139,12 @@ func (t *serviceRegistry) GetServicesOutput() []v1.Interface {
 
 				// clean sub resources by kind
 				switch ri.Kind {
-				case management.APIServiceGVK().Kind:
-					delete(ri.SubResources, "details")
-					delete(ri.SubResources, "compliance")
-					delete(ri.SubResources, "status")
 				case management.APIServiceInstanceGVK().Kind:
 					apisi := management.NewAPIServiceInstance("", "")
 					apisi.FromInstance(ri)
 					apisi.Spec.AccessRequestDefinition = ""
 					apisi.Spec.CredentialRequestDefinitions = []string{}
 					ri, _ = apisi.AsInstance()
-					delete(ri.SubResources, "references")
-				case management.APIServiceRevisionGVK().Kind:
-					delete(ri.SubResources, "compliance")
 				}
 
 				ri.Metadata.Audit = v1.AuditMetadata{}
