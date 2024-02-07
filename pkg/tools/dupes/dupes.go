@@ -3,6 +3,7 @@ package dupes
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/Axway/agent-sdk/pkg/apic"
@@ -112,6 +113,8 @@ func (t *tool) findDupes() error {
 }
 
 func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) {
+	sort.Strings(services)
+
 	itemToAssets := map[string]int{}
 	totalAssets := 0
 	if len(services) <= 1 {
@@ -136,22 +139,21 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 	logger.WithField("asset", itemToAssets).WithField("numAssets", totalAssets).Info("counted assets")
 
 	svcsWithAssets := 0
-	svcWithAsset := ""
+	svcToKeep := services[0]
 	svcOutput := ""
+
 	// check how many of the services are linked to assets
 	for service, assets := range itemToAssets {
 		svcOutput += fmt.Sprintf("\t%s: %v assets\n", service, assets)
 		if assets > 0 {
-			svcWithAsset = service
+			svcToKeep = service
 			svcsWithAssets++
 		}
 	}
 
 	// output actions that can be taken
-	if svcsWithAssets == 0 {
-		t.output = append(t.output, "ACTION: For the following services combine all revisions to any and remove others")
-	} else if svcsWithAssets == 1 {
-		t.output = append(t.output, fmt.Sprintf("ACTION: For the following services combine all revisions to %s and remove others", svcWithAsset))
+	if svcsWithAssets <= 1 {
+		t.output = append(t.output, fmt.Sprintf("ACTION: For the following services combine all revisions to %s and remove others", svcToKeep))
 	} else if svcsWithAssets == 2 {
 		t.output = append(t.output, "ACTION: For the following services more investigation needed as multiple services have assets")
 	}
