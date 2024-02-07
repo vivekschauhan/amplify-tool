@@ -145,11 +145,11 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 		}
 	}
 	if svcsWithAssets == 0 {
-		t.output = append(t.output, fmt.Sprintf("ACTION: For services (%s) combine all revisions to any and remove others", strings.Join(services, ", ")))
+		t.output = append(t.output, "ACTION: For the following services combine all revisions to any and remove others")
 	} else if svcsWithAssets == 1 {
-		t.output = append(t.output, fmt.Sprintf("ACTION: For services (%s) combine all revisions to %s and remove others", strings.Join(services, ", "), svcWithAsset))
+		t.output = append(t.output, fmt.Sprintf("ACTION: For the following services combine all revisions to %s and remove others", svcWithAsset))
 	} else if svcsWithAssets == 2 {
-		t.output = append(t.output, fmt.Sprintf("ACTION: For services (%s) more investigation needed as multiple services have assets", strings.Join(services, ", ")))
+		t.output = append(t.output, "ACTION: For the following services more investigation needed as multiple services have assets")
 	}
 	t.output = append(t.output, svcOutput)
 }
