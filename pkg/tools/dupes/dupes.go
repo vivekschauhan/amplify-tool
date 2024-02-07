@@ -117,7 +117,7 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 	if len(services) <= 1 {
 		return
 	}
-	t.output = append(t.output, fmt.Sprintf("Found possible duplicate services: %s", strings.Join(services, ", ")))
+	// t.output = append(t.output, fmt.Sprintf("Found possible duplicate services: %s", strings.Join(services, ", ")))
 	for _, service := range services {
 		svcInfo := t.serviceRegistry.GetAPIServiceInfo(env, service)
 		if svcInfo == nil {
@@ -136,9 +136,9 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 	logger.WithField("asset", itemToAssets).WithField("numAssets", totalAssets).Info("counted assets")
 	svcsWithAssets := 0
 	svcWithAsset := ""
+	svcOutput := ""
 	for service, assets := range itemToAssets {
-		svcOutput := fmt.Sprintf("%s: %v assets", service, assets)
-		t.output = append(t.output, svcOutput)
+		svcOutput += fmt.Sprintf("\t%s: %v assets\n", service, assets)
 		if assets > 0 {
 			svcWithAsset = service
 			svcsWithAssets++
@@ -151,6 +151,7 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 	} else if svcsWithAssets == 2 {
 		t.output = append(t.output, fmt.Sprintf("ACTION: For services (%s) more investigation needed as multiple services have assets", strings.Join(services, ", ")))
 	}
+	t.output = append(t.output, svcOutput)
 }
 
 func (t *tool) groupServicesInEnv(env string) map[string][]string {
