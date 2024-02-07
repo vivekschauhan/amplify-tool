@@ -117,14 +117,14 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 	if len(services) <= 1 {
 		return
 	}
-	// t.output = append(t.output, fmt.Sprintf("Found possible duplicate services: %s", strings.Join(services, ", ")))
+
+	// loop through all services in groups and count the number of assets
 	for _, service := range services {
 		svcInfo := t.serviceRegistry.GetAPIServiceInfo(env, service)
 		if svcInfo == nil {
 			continue
 		}
-		temp := strings.HasPrefix(service, "wss-weather-standard-solution-api")
-		_ = temp
+
 		itemToAssets[service] = 0
 		for _, inst := range svcInfo.APIServiceInstances {
 			assets := t.assetCatalog.AssetsForInstance(inst.Group, env, inst.Name)
@@ -134,9 +134,11 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 		logger.WithField("svc", service).WithField("assetsPerSvc", itemToAssets[service]).Debug("done finding assets for service")
 	}
 	logger.WithField("asset", itemToAssets).WithField("numAssets", totalAssets).Info("counted assets")
+
 	svcsWithAssets := 0
 	svcWithAsset := ""
 	svcOutput := ""
+	// check how many of the services are linked to assets
 	for service, assets := range itemToAssets {
 		svcOutput += fmt.Sprintf("\t%s: %v assets\n", service, assets)
 		if assets > 0 {
@@ -144,6 +146,8 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 			svcsWithAssets++
 		}
 	}
+
+	// output actions that can be taken
 	if svcsWithAssets == 0 {
 		t.output = append(t.output, "ACTION: For the following services combine all revisions to any and remove others")
 	} else if svcsWithAssets == 1 {
