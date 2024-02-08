@@ -7,7 +7,7 @@ Tool for Amplify Service Registry, Asset and Product catalog
 ```
 ./amplify-tool help repairAsset
 
-Amplify Repair Asset Tool
+Amplify Service Registry, Asset, and Product Repair Asset Tool
 
 Usage:
    repairAsset [flags]

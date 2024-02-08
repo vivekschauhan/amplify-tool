@@ -44,7 +44,7 @@ func NewProductCatalog(logger *logrus.Logger, assetCatalog AssetCatalog, apicCli
 }
 
 func (t *productCatalog) WriteProducts() {
-	saveToFile(t.logger, "product-catalog", t.Products)
+	SaveToFile(t.logger, "product-catalog", "product-catalog.json", t.Products)
 }
 
 func (t *productCatalog) ReadProducts() {
@@ -562,8 +562,8 @@ func (t *productCatalog) recreateQuotaSpec(logger *logrus.Entry, existingQuotaSp
 		qar := &catalog.QuotaSpecAssetResourceRef{}
 		json.Unmarshal(buf, qar)
 		if qar.Kind == "AssetResource" {
-			assetResName := t.assetCatalog.FindAssetResource(logger, qar.Name)
-			if assetResName == "" {
+			assetID := t.assetCatalog.FindAssetResource(logger, qar.Name)
+			if assetID == "" {
 				logger.WithField("assetName", qar.Name).Warn("missing asset resource")
 				continue
 			}

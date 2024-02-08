@@ -9,3 +9,6 @@ bin/
 __debug_bin
 debug
 *.log
+
+temp/
+export*.json

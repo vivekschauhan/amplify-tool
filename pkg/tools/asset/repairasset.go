@@ -1,18 +1,16 @@
-package tool
+package asset
 
 import (
 	"github.com/Axway/agent-sdk/pkg/apic"
-	"github.com/Axway/agent-sdk/pkg/apic/auth"
-	"github.com/Axway/agent-sdk/pkg/config"
 	utillog "github.com/Axway/agent-sdk/pkg/util/log"
 	"github.com/sirupsen/logrus"
 	"github.com/vivekschauhan/amplify-tool/pkg/log"
 	"github.com/vivekschauhan/amplify-tool/pkg/service"
+	"github.com/vivekschauhan/amplify-tool/pkg/tools"
 )
 
 type Tool interface {
 	Run() error
-	RunRepairProduct() error
 }
 
 type tool struct {
@@ -26,12 +24,12 @@ type tool struct {
 
 func NewTool(cfg *Config) Tool {
 	logger := log.GetLogger(cfg.Level, cfg.Format)
-	apicClient := createAPICClient(cfg)
+	apicClient := tools.CreateAPICClient(&cfg.Config)
 	utillog.GlobalLoggerConfig.Level(cfg.Level).
 		Format(cfg.Format).
 		Apply()
-	serviceRegistry := service.NewServiceRegistry(logger, apicClient, cfg.ServiceMappingFile, cfg.DryRun)
-	assetCatalog := service.NewAssetCatalog(logger, serviceRegistry, apicClient, cfg.DryRun)
+	serviceRegistry := service.NewServiceRegistry(logger, apicClient, cfg.DryRun, service.WithMappingFile(cfg.ServiceMappingFile))
+	assetCatalog := service.NewAssetCatalog(logger, apicClient, cfg.DryRun, serviceRegistry)
 	productCatalog := service.NewProductCatalog(logger, assetCatalog, apicClient, cfg.ProductCatalogFile, cfg.DryRun)
 	return &tool{
 		logger:          logger,
@@ -41,25 +39,6 @@ func NewTool(cfg *Config) Tool {
 		assetCatalog:    assetCatalog,
 		productCatalog:  productCatalog,
 	}
-}
-
-func createAPICClient(cfg *Config) apic.Client {
-	c := config.NewCentralConfig(config.GenericService)
-	centralCfg, _ := c.(*config.CentralConfiguration)
-	centralCfg.URL = cfg.URL
-	centralCfg.PlatformURL = cfg.PlatformURL
-	acfg := centralCfg.GetAuthConfig()
-	authCfg, _ := acfg.(*config.AuthConfiguration)
-	authCfg.ClientID = cfg.Auth.ClientID
-	authCfg.PrivateKey = cfg.Auth.PrivateKey
-	authCfg.PublicKey = cfg.Auth.PublicKey
-	authCfg.KeyPwd = cfg.Auth.KeyPassword
-	authCfg.URL = cfg.Auth.URL
-	authCfg.Timeout = cfg.Auth.Timeout
-	authCfg.Realm = "Broker"
-
-	tokenGetter := auth.NewPlatformTokenGetterWithCentralConfig(centralCfg)
-	return apic.New(centralCfg, tokenGetter, nil)
 }
 
 func (t *tool) Run() error {
@@ -72,7 +51,6 @@ func (t *tool) Run() error {
 	}
 	t.productCatalog.PreProcessProductForAssetRepair()
 	t.assetCatalog.RepairAsset()
-	//t.productCatalog.PostProcessProductForAssetRepair()
 	t.assetCatalog.PostRepairAsset()
 	return nil
 }
