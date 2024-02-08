@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Axway/agent-sdk/pkg/apic"
 	"github.com/Axway/agent-sdk/pkg/apic/definitions"
@@ -14,6 +15,11 @@ import (
 	"github.com/vivekschauhan/amplify-tool/pkg/log"
 	"github.com/vivekschauhan/amplify-tool/pkg/service"
 	"github.com/vivekschauhan/amplify-tool/pkg/tools"
+)
+
+const (
+	sep  = "############################################################################################################################################################"
+	sep2 = "************************************************************************************************************************************************************"
 )
 
 type Tool interface {
@@ -122,10 +128,18 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 	}
 
 	// loop through all services in groups and count the number of assets
+	serviceToKeep := services[0]
+	serviceToKeepTime := time.Now()
 	for _, service := range services {
 		svcInfo := t.serviceRegistry.GetAPIServiceInfo(env, service)
 		if svcInfo == nil {
 			continue
+		}
+
+		// find oldest service and set that one to keep
+		if t := time.Time(svcInfo.APIService.GetMetadata().Audit.CreateTimestamp); t.Before(serviceToKeepTime) {
+			serviceToKeepTime = t
+			serviceToKeep = service
 		}
 
 		itemToAssets[service] = 0
@@ -138,26 +152,86 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 	}
 	logger.WithField("asset", itemToAssets).WithField("numAssets", totalAssets).Info("counted assets")
 
-	svcsWithAssets := 0
-	svcToKeep := services[0]
-	svcOutput := ""
+	servicesWithAssets := 0
 
 	// check how many of the services are linked to assets
 	for service, assets := range itemToAssets {
-		svcOutput += fmt.Sprintf("\t%s: %v assets\n", service, assets)
 		if assets > 0 {
-			svcToKeep = service
-			svcsWithAssets++
+			serviceToKeep = service
+			servicesWithAssets++
 		}
 	}
 
-	// output actions that can be taken
-	if svcsWithAssets <= 1 {
-		t.output = append(t.output, fmt.Sprintf("ACTION: For the following services combine all revisions to %s and remove others", svcToKeep))
-	} else if svcsWithAssets == 2 {
-		t.output = append(t.output, "ACTION: For the following services more investigation needed as multiple services have assets")
+	t.output = append(t.output, sep)
+	// when greater than 2 output that more care needs to be taken
+	if servicesWithAssets == 2 {
+		t.output = append(t.output, "#\tACTION: For the following services more investigation needed as multiple services have assets")
+		for _, service := range services {
+			t.output = append(t.output, fmt.Sprintf("#\t\t%v has %v assets", service, itemToAssets[service]))
+		}
+		t.output = append(t.output, sep)
+		t.output = append(t.output, "")
+		return
 	}
-	t.output = append(t.output, svcOutput)
+
+	// 1 or fewer services with assets
+	t.output = append(t.output, fmt.Sprintf("#\tACTION: For the following services combine all revisions to %s and remove others", serviceToKeep))
+
+	logger = logger.WithField("serviceToKeep", serviceToKeep)
+	logger.Info("starting to compare spec hashes")
+	svcKeepInfo := t.serviceRegistry.GetAPIServiceInfo(env, serviceToKeep)
+	svcKeepDetails := util.GetAgentDetails(svcKeepInfo.APIService)
+	hashes := map[string]interface{}{}
+	if v, found := svcKeepDetails["specHashes"]; found {
+		hashes = v.(map[string]interface{})
+	}
+
+	// check hashes for revision referenced by instance to see if they need merged
+	actionOutput := ""
+	commandOutput := ""
+	logger = logger.WithField("hashData", hashes)
+	for _, service := range services {
+		if service == serviceToKeep {
+			continue
+		}
+
+		logger = logger.WithField("service", service)
+		logger.Debug("comparing hash of revision on instance to hashes in service to keep")
+		svcInfo := t.serviceRegistry.GetAPIServiceInfo(env, service)
+		for _, inst := range svcInfo.APIServiceInstances {
+			hash, err := util.GetAgentDetailsValue(inst, "tempHash")
+			if err != nil {
+				actionOutput += fmt.Sprintf("#\t\t%v no hash found, take care with removing\n", service)
+				continue
+			}
+			logger = logger.WithField("hash", hash)
+
+			logger.Debug("handling instance hash compare")
+			if _, found := hashes[hash]; found {
+				actionOutput += fmt.Sprintf("#\t\t%v can be deleted without any merge as hash exists on %v and it has %v related assets\n", service, serviceToKeep, itemToAssets[service])
+				commandOutput += fmt.Sprintf("axway central delete -s %v apiservice %v\n", env, service)
+			} else {
+				actionOutput += fmt.Sprintf("#\t\t%v can be deleted after merging revision %v to %v\n", service, inst.Spec.ApiServiceRevision, serviceToKeep)
+				commandOutput += fmt.Sprintf("axway central get -o json -s %v apiservicerevision %v > %v.json\n", env, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
+				commandOutput += fmt.Sprintf("jq '.spec.apiService |= \"%v\" %v.json > %v.json\n", service, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
+				commandOutput += fmt.Sprintf("axway central apply -f %v.json\n", inst.Spec.ApiServiceRevision)
+				commandOutput += fmt.Sprintf("%v\n", sep2)
+				commandOutput += fmt.Sprintf("#\tIn environment %v an update to the APIServiceInstance(s) related to %v may be necessary, in order to point to new revision %v\n", env, service, inst.Spec.ApiServiceRevision)
+				commandOutput += fmt.Sprintf("%v\n", sep2)
+			}
+		}
+	}
+	// append actionOutput to log
+	actionOutput = strings.TrimRight(actionOutput, "\n")
+	t.output = append(t.output, actionOutput)
+	t.output = append(t.output, sep2)
+
+	// append commandOutput to log
+	commandOutput = strings.TrimRight(commandOutput, "\n")
+	t.output = append(t.output, "#\tExecute the following commands to clean these duplicated services")
+	t.output = append(t.output, commandOutput)
+	t.output = append(t.output, sep)
+	t.output = append(t.output, "")
 }
 
 func (t *tool) groupServicesInEnv(env string) map[string][]string {
@@ -169,6 +243,11 @@ func (t *tool) groupServicesInEnv(env string) map[string][]string {
 
 	for service, serviceInfo := range servicesInfo {
 		logger = logger.WithField("svc", service)
+		svcDetails := util.GetAgentDetails(serviceInfo.APIService)
+		hashes := map[string]interface{}{}
+		if v, found := svcDetails["specHashes"]; found {
+			hashes = v.(map[string]interface{})
+		}
 		for _, inst := range serviceInfo.APIServiceInstances {
 			logger = logger.WithField("instance", inst.Name)
 
@@ -184,6 +263,17 @@ func (t *tool) groupServicesInEnv(env string) map[string][]string {
 					break
 				}
 				logger = logger.WithField("groupBy", groupBy)
+			}
+
+			// get revision hash from service and add to tempHash x-agent-detail on instance for duplication processing
+			rev := inst.Spec.ApiServiceRevision
+			logger.WithField("hashData", hashes).WithField("rev.Name", rev).Debug("looking for revision hash on service")
+			for hash, revName := range hashes {
+				if rev == revName.(string) {
+					util.SetAgentDetailsKey(inst, "tempHash", hash)
+					t.serviceRegistry.UpdateAPIServiceInst(env, service, inst)
+					break
+				}
 			}
 
 			if key, found := details[groupBy]; found {

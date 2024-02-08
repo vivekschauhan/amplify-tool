@@ -23,6 +23,7 @@ type ServiceRegistry interface {
 	GetAPIServicesInfo(env string) map[string]APIServiceInfo
 	GetAPIService(env, name string) *management.APIService
 	GetAPIServiceInfo(env, name string) *APIServiceInfo
+	UpdateAPIServiceInst(env, name string, inst *management.APIServiceInstance)
 	FindService(logger *logrus.Entry, scope, name string) *management.APIService
 	IsUsingMapping() bool
 }
@@ -331,6 +332,16 @@ func (t *serviceRegistry) GetAPIServiceInfo(env, name string) *APIServiceInfo {
 		return &apiServiceInfo
 	}
 	return nil
+}
+
+func (t *serviceRegistry) UpdateAPIServiceInst(env, name string, inst *management.APIServiceInstance) {
+	if t.GetAPIService(env, name) == nil {
+		return
+	}
+
+	if _, found := t.APIServices[env][name].APIServiceInstances[inst.Metadata.ID]; found {
+		t.APIServices[env][name].APIServiceInstances[inst.Metadata.ID] = inst
+	}
 }
 
 func (t *serviceRegistry) GetAPIService(env, name string) *management.APIService {
