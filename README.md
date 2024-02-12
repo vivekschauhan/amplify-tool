@@ -91,3 +91,11 @@ The tool follows the following process:
 * For all services group them based off the External API ID found on the related API Service Instance
 * For each grouping determine the number of assets that each service is referenced in
 * Output an action based off the number of services in a group that are referenced in assets
+
+When running this tool follow the steps below.
+
+1. Execute the duplicate detect tool
+2. Review the output file and remove commands that should not be executed and save the updated file
+3. Stop all agents and clean up their persistent cache, if in use
+4. Run commands in the reviewed actions file (*NOTE: These actions can not be undone!!!!*)
+5. Restart your agents
