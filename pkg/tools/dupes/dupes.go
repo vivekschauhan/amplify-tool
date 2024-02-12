@@ -19,7 +19,7 @@ import (
 
 const (
 	sep  = "############################################################################################################################################################"
-	sep2 = "************************************************************************************************************************************************************"
+	sep2 = "#**********************************************************************************************************************************************************#"
 )
 
 type Tool interface {
@@ -215,16 +215,16 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 				commandOutput += fmt.Sprintf("axway central get -o json -s %v apiservicerevision %v > %v.json\n", env, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
 				commandOutput += fmt.Sprintf("jq '.spec.apiService |= \"%v\" %v.json > %v.json\n", service, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
 				commandOutput += fmt.Sprintf("axway central apply -f %v.json\n", inst.Spec.ApiServiceRevision)
-				commandOutput += fmt.Sprintf("#%v\n", sep2)
+				commandOutput += fmt.Sprintf("%v\n", sep2)
 				commandOutput += fmt.Sprintf("#\tIn environment %v an update to the APIServiceInstance(s) related to %v may be necessary, in order to point to new revision %v\n", env, service, inst.Spec.ApiServiceRevision)
-				commandOutput += fmt.Sprintf("#%v\n", sep2)
+				commandOutput += fmt.Sprintf("%v\n", sep2)
 			}
 		}
 	}
 	// append actionOutput to log
 	actionOutput = strings.TrimRight(actionOutput, "\n")
 	t.output = append(t.output, actionOutput)
-	t.output = append(t.output, fmt.Sprintf("#%v", sep2))
+	t.output = append(t.output, sep2)
 
 	// append commandOutput to log
 	commandOutput = strings.TrimRight(commandOutput, "\n")
