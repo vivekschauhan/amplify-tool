@@ -5,7 +5,6 @@ on:
     types: [created]
 
 env:
-  CMD_PATH: ./cmd/vt2geojson
   AGENT_NAME: AmplifyTool
   DESCRIPTION: AmplifyTool
 
