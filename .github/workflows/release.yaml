@@ -6,7 +6,7 @@ on:
 
 env:
   AGENT_NAME: AmplifyTool
-  DESCRIPTION: AmplifyTool
+  DESCRIPTION: Amplify Tool
 
 permissions:
     contents: write
