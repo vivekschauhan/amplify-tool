@@ -12,7 +12,7 @@ func newDuplicateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "duplicate",
 		Short:   "Amplify Duplicate Repair Tool",
-		Version: "0.0.1",
+		Version: "0.0.2",
 		RunE:    runDeduplicate,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			v, err := initViperConfig(cmd)
