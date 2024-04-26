@@ -69,6 +69,7 @@ Flags:
       --auth.public_key string     The public key associated with service account(default : ./public_key.pem) (default "./public_key.pem")
       --auth.timeout duration      The connection timeout for AxwayID (default 10s)
       --auth.url string            The AxwayID auth URL
+      --backup_file string         The name of the file to backup to, not created in dry runs
       --dry_run                    Run the tool with no update(true/false)
       --environments string        The environments to run the deduplication against, comma separated
   -h, --help                       help for duplicate
@@ -95,6 +96,7 @@ The tool follows the following process:
 When running this tool follow the steps below.
 
 1. Execute the duplicate detect tool
+  * Optionally use the `backup_file` option to save the resources being referneced in the actions to a backup file
 2. Review the output file and remove commands that should not be executed and save the updated file
 3. Stop all agents and clean up their persistent cache, if in use
 4. Run commands in the reviewed actions file (*NOTE: These actions can not be undone!!!!*)
