@@ -128,7 +128,8 @@ func (t *tool) findDupes() error {
 		os.WriteFile(t.outFile, []byte(output), 0777)
 	}
 	if t.backupFile != "" {
-		os.WriteFile(t.backupFile, []byte(output), 0777)
+		backup := strings.Join(t.backup, "\n")
+		os.WriteFile(t.backupFile, []byte(backup), 0777)
 	}
 	return nil
 }
