@@ -236,7 +236,7 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 			} else {
 				actionOutput += fmt.Sprintf("#\t\t%v can be deleted after merging revision %v to %v\n", service, inst.Spec.ApiServiceRevision, serviceToKeep)
 				commandOutput += fmt.Sprintf("axway central get -o json -s %v apiservicerevision %v > %v.json\n", env, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
-				commandOutput += fmt.Sprintf("jq '.spec.apiService |= \"%v\"' %v.json > %v-new.json\n", service, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
+				commandOutput += fmt.Sprintf("jq '.spec.apiService |= \"%v\"' %v.json > %v-new.json\n", serviceToKeep, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
 				commandOutput += fmt.Sprintf("axway central apply -f %v-new.json\n", inst.Spec.ApiServiceRevision)
 				commandOutput += fmt.Sprintf("%v\n", sep2)
 				commandOutput += fmt.Sprintf("#\tIn environment %v an update to the APIServiceInstance(s) related to %v may be necessary, in order to point to new revision %v\n", env, service, inst.Spec.ApiServiceRevision)
