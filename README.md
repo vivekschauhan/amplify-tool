@@ -98,5 +98,8 @@ When running this tool follow the steps below.
 2. Review the output file and remove commands that should not be executed and save the updated file
 3. Stop all agents and clean up their persistent cache, if in use
    * This will be found in the data/cache directory that the agent is executed within
+   * For Docker containers the data directory can be found with the following command
+     * `docker inspect <CONTAINER_NAME> | jq -r '.[0].Mounts | map(select(.Destination == "/data")) | .[0].Source`
+     * Make sure to stop the agent prior to cleaning the cache file
 4. Run commands in the reviewed actions file (*NOTE: These actions can not be undone!!!!*)
 5. Restart your agents
