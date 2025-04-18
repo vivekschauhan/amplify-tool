@@ -28,6 +28,7 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.AddCommand(newDuplicateCmd())
 	rootCmd.AddCommand(newExportCmd())
 	rootCmd.AddCommand(newImportCmd())
+	rootCmd.AddCommand(newMetricCmd())
 	return rootCmd
 }
 
@@ -41,7 +42,7 @@ func initViperConfig(cmd *cobra.Command) (*viper.Viper, error) {
 		return nil, err
 	}
 
-	return v, setupURLs()
+	return v, nil
 }
 
 // bindFlagsToViperConfig - For each flag, look up its corresponding env var, and use the env var if the flag is not set.
@@ -79,28 +80,4 @@ func baseFlags(cmd *cobra.Command) {
 	cmd.Flags().String("log_level", "info", "log level")
 	cmd.Flags().String("log_format", "json", "line or json")
 	cmd.Flags().Bool("dry_run", false, "Run the tool with no update(true/false)")
-}
-
-func setupURLs() error {
-	url := "https://apicentral.axway.com"
-	platURL := "https://platform.axway.com"
-	authURL := "https://login.axway.com/auth"
-	if strings.ToLower(cfg.Region) == "eu" {
-		url = "https://central.eu-fr.axway.com"
-	} else if strings.ToLower(cfg.Region) == "apac" {
-		url = "https://central.ap-sg.axway.com"
-	} else if strings.ToLower(cfg.Region) == "us" {
-	} else {
-		return fmt.Errorf("region is not valid (us,eu,apac)")
-	}
-	if cfg.URL == "" {
-		cfg.URL = url
-	}
-	if cfg.PlatformURL == "" {
-		cfg.PlatformURL = platURL
-	}
-	if cfg.Auth.URL == "" {
-		cfg.Auth.URL = authURL
-	}
-	return nil
 }

@@ -24,7 +24,7 @@ type tool struct {
 
 func NewTool(cfg *Config) Tool {
 	logger := log.GetLogger(cfg.Level, cfg.Format)
-	apicClient := tools.CreateAPICClient(&cfg.Config)
+	apicClient, _ := tools.CreateAPICClient(&cfg.Config)
 	utillog.GlobalLoggerConfig.Level(cfg.Level).
 		Format(cfg.Format).
 		Apply()
