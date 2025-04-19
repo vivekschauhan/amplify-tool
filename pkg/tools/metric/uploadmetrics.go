@@ -1,6 +1,8 @@
 package metric
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -281,33 +283,32 @@ func (t *tool) getResponseData(values []int64) responseData {
 func (t *tool) sendMetric(metric publishMetric) {
 	token, _ := t.tokenGetter.GetToken()
 
-	logData := map[string]interface{}{
-		"@timestamp": time.Now().Format(time.RFC3339),
-		"message":    t.createV4Event(metric),
-		"fields": map[string]string{
-			"token":             token,
-			"axway-target-flow": metricFlow,
-		},
-	}
-
-	jsonData, err := json.Marshal(logData)
+	jsonData, err := json.Marshal(t.createV4Event(metric))
 	if err != nil {
 		fmt.Println("Error marshaling JSON:", err)
 		return
 	}
 
+	var b bytes.Buffer
+	gz := gzip.NewWriter(&b)
+	gz.Write(jsonData)
+	gz.Close()
+
 	req := api.Request{
 		Method: http.MethodPost,
 		URL:    "https://" + t.cfg.TraceabilityHost,
 		Headers: map[string]string{
-			"Authorization":  "Bearer " + token,
-			"Capture-Org-ID": t.cfg.OrgID,
-			"User-Agent":     "generic-service",
-			"Content-Type":   "application/json; charset=UTF-8",
-			"Timestamp":      strconv.FormatInt(metric.starTime.UTC().Unix(), 10),
+			"Authorization":     "Bearer " + token,
+			"Capture-Org-ID":    t.cfg.OrgID,
+			"User-Agent":        "generic-service",
+			"Content-Type":      "application/json; charset=UTF-8",
+			"Content-Encoding":  "gzip",
+			"Axway-Target-Flow": metricFlow,
+			"Timestamp":         strconv.FormatInt(metric.starTime.UTC().UnixMilli(), 10),
 		},
-		Body: jsonData,
+		Body: b.Bytes(),
 	}
+	// beat.Event{}
 
 	resp, err := t.apiClient.Send(req)
 	if err != nil {
@@ -323,17 +324,19 @@ func (t *tool) sendMetric(metric publishMetric) {
 	fmt.Println("Data sent successfully to Logstash")
 }
 
-func (t *tool) createV4Event(metricData publishMetric) metric.V4Event {
-	return metric.V4Event{
-		ID:        uuid.NewString(),
-		Timestamp: metricData.starTime.Unix(),
-		Event:     metricEvent,
-		App:       "7fd20fc9-ef33-4b19-981e-1afff6bc4c97", // TODO
-		Version:   "4",
-		Distribution: &metric.V4EventDistribution{
-			Environment: t.cfg.EnvironmentID,
-			Version:     "1",
+func (t *tool) createV4Event(metricData publishMetric) []metric.V4Event {
+	return []metric.V4Event{
+		{
+			ID:        uuid.NewString(),
+			Timestamp: metricData.starTime.UnixMilli(),
+			Event:     metricEvent,
+			App:       "7fd20fc9-ef33-4b19-981e-1afff6bc4c97", // TODO
+			Version:   "4",
+			Distribution: &metric.V4EventDistribution{
+				Environment: t.cfg.EnvironmentID,
+				Version:     "1",
+			},
+			Data: metricData,
 		},
-		Data: metricData,
 	}
 }
