@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/Axway/agent-sdk/pkg/cache"
+	"github.com/Axway/agent-sdk/pkg/transaction/metric"
 	"github.com/Axway/agent-sdk/pkg/transaction/models"
 	"github.com/sirupsen/logrus"
 )
@@ -35,9 +36,6 @@ type cachedMetric struct {
 	StatusCode    string                               `json:"statusCode,omitempty"`
 	Count         int64                                `json:"count"`
 	Values        []int64                              `json:"values,omitempty"`
-	starTime      time.Time
-	eventType     string
-	eventID       string
 }
 
 type responseData struct {
@@ -64,15 +62,15 @@ type publishMetric struct {
 	API           *models.APIResourceReference         `json:"api,omitempty"`
 	AssetResource *models.ResourceReference            `json:"assetResource,omitempty"`
 	ProductPlan   *models.ResourceReference            `json:"productPlan,omitempty"`
-
-	Unit      units `json:"units,omitempty"`
-	starTime  time.Time
-	eventType string
-	eventID   string
+	Reporter      *metric.Reporter                     `json:"reporter,omitempty"`
+	Unit          units                                `json:"units,omitempty"`
+	startTime     time.Time
+	eventType     string
+	eventID       string
 }
 
 func (c publishMetric) GetStartTime() time.Time {
-	return c.starTime
+	return c.startTime
 }
 func (c publishMetric) GetType() string {
 	return c.eventType

@@ -35,6 +35,8 @@ type tool struct {
 	logger      *logrus.Logger
 	tokenGetter auth.PlatformTokenGetter
 	cacheData   *data
+	batchSize   int
+	reporter    *metric.Reporter
 }
 
 func NewTool(cfg *Config) Tool {
@@ -49,6 +51,13 @@ func NewTool(cfg *Config) Tool {
 		apiClient:   api.NewClient(config.NewTLSConfig(), "", api.WithSingleURL()),
 		tokenGetter: tokenGetter,
 		cacheData:   &data{},
+		batchSize:   cfg.BatchSize,
+		reporter: &metric.Reporter{
+			AgentName:       cfg.AgentName,
+			AgentVersion:    cfg.AgentVersion,
+			AgentSDKVersion: cfg.AgentSDKVersion,
+			AgentType:       cfg.AgentType,
+		},
 	}
 }
 
@@ -143,7 +152,7 @@ func (t *tool) uploadUsage() {
 				},
 			},
 		},
-		Meta: map[string]interface{}{},
+		Meta: t.createUsageMetaData(),
 	}
 
 	if t.cfg.DryRun {
@@ -185,6 +194,23 @@ func (t *tool) uploadUsage() {
 	logger.Debug("successfully uploaded usage")
 }
 
+func (t *tool) createUsageMetaData() map[string]interface{} {
+	meta := map[string]interface{}{}
+	if t.reporter.AgentName != "" {
+		meta["AgentName"] = t.reporter.AgentName
+	}
+	if t.reporter.AgentSDKVersion != "" {
+		meta["AgentSDKVersion"] = t.reporter.AgentSDKVersion
+	}
+	if t.reporter.AgentType != "" {
+		meta["AgentType"] = t.reporter.AgentType
+	}
+	if t.reporter.AgentVersion != "" {
+		meta["AgentVersion"] = t.reporter.AgentVersion
+	}
+	return meta
+}
+
 func (t *tool) uploadMetrics() {
 	logger := t.logger.WithField("action", "metrics")
 	logger.Info("starting to upload metrics")
@@ -195,7 +221,7 @@ func (t *tool) uploadMetrics() {
 		logger.Error("could not find metric start time in metric cache")
 		return
 	}
-	// read usage count
+	// read metric start time
 	startTimeStr, ok := metricTimeItem.Object.(string)
 	if !ok {
 		logger.Error("could not get metric start time from metric data")
@@ -208,53 +234,67 @@ func (t *tool) uploadMetrics() {
 	}
 	logger = logger.WithField("startTime", startTime)
 
+	// read last update time as end time
+	endTime := time.Unix(metricTimeItem.UpdateTime, 0)
+	logger = logger.WithField("endTime", endTime)
+
+	batch := []publishMetric{}
 	for key, item := range t.cacheData.Cache {
 		if !strings.HasPrefix(key, metricPrefix) {
 			// skip non  metric keys
 			continue
 		}
 		uuid := uuid.NewString()
-		logger := logger.WithField("metricKey", key).WithField("eventID", uuid)
+		keyLogger := logger.WithField("metricKey", key).WithField("eventID", uuid)
 
 		// convert the object to json
 		jsonData, err := json.Marshal(item.Object)
 		if err != nil {
-			logger.WithError(err).Error("could not get metric data")
+			keyLogger.WithError(err).Error("could not get metric data")
 			continue
 		}
 
-		metric := cachedMetric{}
+		metricData := cachedMetric{}
 		// read teh data back into the expected object
-		err = json.Unmarshal(jsonData, &metric)
+		err = json.Unmarshal(jsonData, &metricData)
 		if err != nil {
-			logger.WithError(err).Error("could not get metric data")
+			keyLogger.WithError(err).Error("could not get metric data")
 			continue
 		}
-		metric.eventID = uuid
-		metric.starTime = startTime
-		metric.eventType = metricEvent
 
-		logger.Info("creating and uploading metric")
-		t.sendMetric(publishMetric{
-			Subscription:  metric.Subscription,
-			App:           metric.App,
-			Product:       metric.Product,
-			API:           metric.API,
-			AssetResource: metric.AssetResource,
-			ProductPlan:   metric.ProductPlan,
+		keyLogger.Info("creating metric and adding to batch")
+		batch = append(batch, publishMetric{
+			Subscription:  metricData.Subscription,
+			App:           metricData.App,
+			Product:       metricData.Product,
+			API:           metricData.API,
+			AssetResource: metricData.AssetResource,
+			ProductPlan:   metricData.ProductPlan,
 			Unit: units{
 				Transactions: transaction{
-					Count:    int(metric.Count),
-					Status:   metric.StatusCode,
-					Quota:    metric.Quota,
-					Response: t.getResponseData(metric.Values),
+					Count:    int(metricData.Count),
+					Status:   metricData.StatusCode,
+					Quota:    metricData.Quota,
+					Response: t.getResponseData(metricData.Values),
 				},
 			},
+			Reporter: &metric.Reporter{
+				AgentName:        t.reporter.AgentName,
+				AgentVersion:     t.reporter.AgentVersion,
+				AgentType:        t.reporter.AgentType,
+				AgentSDKVersion:  t.reporter.AgentSDKVersion,
+				ObservationDelta: int64(endTime.Sub(startTime).Milliseconds()),
+			},
 			eventID:   uuid,
-			starTime:  startTime,
+			startTime: startTime,
 			eventType: metricEvent,
 		})
+		if len(batch) == t.batchSize {
+			t.sendMetricBatch(logger, batch, startTime)
+			batch = []publishMetric{}
+		}
 	}
+	t.sendMetricBatch(logger, batch, startTime) // send final batch
 }
 
 func (t *tool) getResponseData(values []int64) responseData {
@@ -280,19 +320,37 @@ func (t *tool) getResponseData(values []int64) responseData {
 	}
 }
 
-func (t *tool) sendMetric(metric publishMetric) {
+func (t *tool) sendMetricBatch(logger *logrus.Entry, batch []publishMetric, startTime time.Time) {
+	logger = logger.WithField("batchSize", len(batch)).WithField("batchID", uuid.NewString())
+	if len(batch) == 0 {
+		logger.Debug("no event in batch")
+		return
+	}
 	token, _ := t.tokenGetter.GetToken()
 
-	jsonData, err := json.Marshal(t.createV4Event(metric))
+	jsonData, err := json.Marshal(t.createV4Events(batch))
 	if err != nil {
-		fmt.Println("Error marshaling JSON:", err)
+		logger.WithError(err).Error("creating json from event batch")
+		return
+	}
+
+	if t.cfg.DryRun {
+		logger.WithField("batch", string(jsonData)).Info("would compress and send")
 		return
 	}
 
 	var b bytes.Buffer
 	gz := gzip.NewWriter(&b)
-	gz.Write(jsonData)
-	gz.Close()
+	_, err = gz.Write(jsonData)
+	if err != nil {
+		logger.WithError(err).Error("compressing event data")
+		return
+	}
+	err = gz.Close()
+	if err != nil {
+		logger.WithError(err).Error("compressing event data")
+		return
+	}
 
 	req := api.Request{
 		Method: http.MethodPost,
@@ -304,39 +362,43 @@ func (t *tool) sendMetric(metric publishMetric) {
 			"Content-Type":      "application/json; charset=UTF-8",
 			"Content-Encoding":  "gzip",
 			"Axway-Target-Flow": metricFlow,
-			"Timestamp":         strconv.FormatInt(metric.starTime.UTC().UnixMilli(), 10),
+			"Timestamp":         strconv.FormatInt(startTime.UTC().UnixMilli(), 10),
 		},
 		Body: b.Bytes(),
 	}
-	// beat.Event{}
 
 	resp, err := t.apiClient.Send(req)
 	if err != nil {
-		fmt.Println("Error sending data to Logstash:", err)
+		logger.WithError(err).Error("sending event data")
 		return
 	}
 
+	logger = logger.WithField("statusCode", resp.Code)
 	if resp.Code != http.StatusOK {
-		fmt.Println("Error: Logstash returned status code", resp.Code)
+		logger.WithError(err).Error("unexpected status code")
 		return
 	}
 
-	fmt.Println("Data sent successfully to Logstash")
+	logger.Info("data sent successfully")
 }
 
-func (t *tool) createV4Event(metricData publishMetric) []metric.V4Event {
-	return []metric.V4Event{
-		{
-			ID:        uuid.NewString(),
-			Timestamp: metricData.starTime.UnixMilli(),
-			Event:     metricEvent,
-			App:       "7fd20fc9-ef33-4b19-981e-1afff6bc4c97", // TODO
-			Version:   "4",
-			Distribution: &metric.V4EventDistribution{
-				Environment: t.cfg.EnvironmentID,
-				Version:     "1",
-			},
-			Data: metricData,
-		},
+func (t *tool) createV4Events(metricData []publishMetric) []metric.V4Event {
+	token, _ := t.tokenGetter.GetToken()
+	events := []metric.V4Event{}
+	for _, e := range metricData {
+		events = append(events,
+			metric.V4Event{
+				ID:        uuid.NewString(),
+				Timestamp: e.startTime.UnixMilli(),
+				Event:     metricEvent,
+				App:       getOrgGUID(token),
+				Version:   "4",
+				Distribution: &metric.V4EventDistribution{
+					Environment: t.cfg.EnvironmentID,
+					Version:     "1",
+				},
+				Data: e,
+			})
 	}
+	return events
 }
