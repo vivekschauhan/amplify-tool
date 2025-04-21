@@ -69,7 +69,7 @@ func baseFlags(cmd *cobra.Command) {
 	cmd.Flags().String("region", "us", "The central region (us, eu, apac)")
 	cmd.Flags().String("url", "", "The central URL")
 	cmd.Flags().String("platform_url", "", "The platform URL")
-
+	cmd.Flags().String("traceability_host", "", "The traceability host to use for uploading metrics")
 	cmd.Flags().String("auth.private_key", "./private_key.pem", "The private key associated with service account(default : ./private_key.pem)")
 	cmd.Flags().String("auth.public_key", "./public_key.pem", "The public key associated with service account(default : ./public_key.pem)")
 	cmd.Flags().String("auth.key_password", "", "The password for private key")
