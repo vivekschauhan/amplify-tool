@@ -103,3 +103,40 @@ When running this tool follow the steps below.
      * Make sure to stop the agent prior to cleaning the cache file
 4. Run commands in the reviewed actions file (*NOTE: These actions can not be undone!!!!*)
 5. Restart your agents
+
+### uploadMetrics
+
+```
+./amplify-tool help uploadMetrics
+Amplify Cached Metic Upload Tool
+
+Usage:
+   uploadMetrics [flags]
+
+Flags:
+      --agent_name string          Set the agent name to report in the events
+      --agent_sdk_version string   Set the agent sdk version to report in the events
+      --agent_type string          Set the agent type to report in the events
+      --agent_version string       Set the agent version to report in the events
+      --auth.client_id string      The service account client ID
+      --auth.key_password string   The password for private key
+      --auth.private_key string    The private key associated with service account(default : ./private_key.pem) (default "./private_key.pem")
+      --auth.public_key string     The public key associated with service account(default : ./public_key.pem) (default "./public_key.pem")
+      --auth.timeout duration      The connection timeout for AxwayID (default 10s)
+      --auth.url string            The AxwayID auth URL
+      --batch_size int             The number of metric events to send in a single batch (default 10)
+      --dry_run                    Run the tool with no update(true/false)
+      --environment_id string      Set the environment id to use with the Usage Report
+  -h, --help                       help for uploadMetrics
+      --log_format string          line or json (default "json")
+      --log_level string           log level (default "info")
+      --metric_cache_file string   The path of the metric cache file created by the agent
+      --org_id string              The Amplify org ID
+      --platform_url string        The platform URL
+      --region string              The central region (us, eu, apac) (default "us")
+      --skip_upload_metrics        Set if the tool should skip uploading metrics
+      --skip_upload_usage          Set if the tool should skip uploading usage details
+      --url string                 The central URL
+      --usage_product string       Set the product name to use with the Usage Report
+  -v, --version                    version for uploadMetrics
+```
