@@ -94,8 +94,8 @@ func CreateAPICClient(cfg *Config) (apic.Client, auth.PlatformTokenGetter) {
 	authCfg.KeyPwd = cfg.Auth.KeyPassword
 	if cfg.Auth.URL == "" {
 		cfg.Auth.URL = urls.AuthURL
-		authCfg.URL = urls.AuthURL
 	}
+	authCfg.URL = cfg.Auth.URL
 	authCfg.Timeout = cfg.Auth.Timeout
 	authCfg.Realm = "Broker"
 
