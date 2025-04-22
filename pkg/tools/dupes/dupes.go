@@ -1,6 +1,7 @@
 package dupes
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -33,8 +34,11 @@ type tool struct {
 	serviceRegistry service.ServiceRegistry
 	assetCatalog    service.AssetCatalog
 	// productCatalog  service.ProductCatalog
-	output  []string
-	outfile string
+	actionIndex int
+	output      []string
+	outFile     string
+	backup      []string
+	backupFile  string
 }
 
 func NewTool(cfg *Config) Tool {
@@ -60,8 +64,11 @@ func NewTool(cfg *Config) Tool {
 		serviceRegistry: serviceRegistry,
 		assetCatalog:    assetCatalog,
 		// productCatalog:  productCatalog,
-		output:  []string{},
-		outfile: cfg.OutFile,
+		actionIndex: 0,
+		output:      []string{},
+		outFile:     cfg.OutFile,
+		backup:      []string{},
+		backupFile:  cfg.BackupFile,
 	}
 }
 
@@ -110,16 +117,26 @@ func (t *tool) findDupes() error {
 	}
 
 	output := strings.Join(t.output, "\n")
-	if t.outfile == "" {
+	if t.outFile == "" || t.cfg.DryRun {
 		fmt.Print(output)
-	} else {
-		os.WriteFile(t.outfile, []byte(output), 0777)
+	}
+	if t.cfg.DryRun {
+		return nil
+	}
+
+	if t.outFile != "" {
+		os.WriteFile(t.outFile, []byte(output), 0777)
+	}
+	if t.backupFile != "" {
+		backup := strings.Join(t.backup, "\n")
+		os.WriteFile(t.backupFile, []byte(backup), 0777)
 	}
 	return nil
 }
 
 func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) {
 	sort.Strings(services)
+	actionString := fmt.Sprintf("%04d", t.actionIndex)
 
 	itemToAssets := map[string]int{}
 	totalAssets := 0
@@ -165,7 +182,8 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 	t.output = append(t.output, sep)
 	// when greater than 2 output that more care needs to be taken
 	if servicesWithAssets == 2 {
-		t.output = append(t.output, "#\tACTION: For the following services more investigation needed as multiple services have assets")
+		t.output = append(t.output, "#\tACTION "+actionString+": For the following services more investigation needed as multiple services have assets")
+		t.actionIndex++
 		for _, service := range services {
 			t.output = append(t.output, fmt.Sprintf("#\t\t%v has %v assets", service, itemToAssets[service]))
 		}
@@ -175,7 +193,10 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 	}
 
 	// 1 or fewer services with assets
-	t.output = append(t.output, fmt.Sprintf("#\tACTION: For the following services combine all revisions to %s and remove others", serviceToKeep))
+	t.output = append(t.output, fmt.Sprintf("#\tACTION "+actionString+": For the following services combine all revisions to %s and remove others", serviceToKeep))
+	t.backup = append(t.backup, sep)
+	t.backup = append(t.backup, "#\tACTION "+actionString+": All backups for action")
+	t.actionIndex++
 
 	logger = logger.WithField("serviceToKeep", serviceToKeep)
 	logger.Info("starting to compare spec hashes")
@@ -190,6 +211,7 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 	actionOutput := ""
 	commandOutput := ""
 	logger = logger.WithField("hashData", hashes)
+	backups := []*service.APIServiceInfo{}
 	for _, service := range services {
 		if service == serviceToKeep {
 			continue
@@ -198,6 +220,7 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 		logger = logger.WithField("service", service)
 		logger.Debug("comparing hash of revision on instance to hashes in service to keep")
 		svcInfo := t.serviceRegistry.GetAPIServiceInfo(env, service)
+		backups = append(backups, svcInfo)
 		for _, inst := range svcInfo.APIServiceInstances {
 			hash, err := util.GetAgentDetailsValue(inst, "tempHash")
 			if err != nil {
@@ -213,8 +236,8 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 			} else {
 				actionOutput += fmt.Sprintf("#\t\t%v can be deleted after merging revision %v to %v\n", service, inst.Spec.ApiServiceRevision, serviceToKeep)
 				commandOutput += fmt.Sprintf("axway central get -o json -s %v apiservicerevision %v > %v.json\n", env, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
-				commandOutput += fmt.Sprintf("jq '.spec.apiService |= \"%v\" %v.json > %v.json\n", service, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
-				commandOutput += fmt.Sprintf("axway central apply -f %v.json\n", inst.Spec.ApiServiceRevision)
+				commandOutput += fmt.Sprintf("jq '.spec.apiService |= \"%v\"' %v.json > %v-new.json\n", serviceToKeep, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
+				commandOutput += fmt.Sprintf("axway central apply -f %v-new.json\n", inst.Spec.ApiServiceRevision)
 				commandOutput += fmt.Sprintf("%v\n", sep2)
 				commandOutput += fmt.Sprintf("#\tIn environment %v an update to the APIServiceInstance(s) related to %v may be necessary, in order to point to new revision %v\n", env, service, inst.Spec.ApiServiceRevision)
 				commandOutput += fmt.Sprintf("%v\n", sep2)
@@ -232,6 +255,12 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 	t.output = append(t.output, commandOutput)
 	t.output = append(t.output, sep)
 	t.output = append(t.output, "")
+
+	// append backup data to log
+	j, _ := json.Marshal(backups)
+	t.backup = append(t.backup, string(j))
+	t.backup = append(t.backup, sep)
+	t.backup = append(t.backup, "")
 }
 
 func (t *tool) groupServicesInEnv(env string) map[string][]string {
