@@ -12,3 +12,4 @@ debug
 
 temp/
 export*.json
+**agent-usagemetric.json
