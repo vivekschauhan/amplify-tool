@@ -211,6 +211,14 @@ func (t *tool) createUsageMetaData() map[string]interface{} {
 	return meta
 }
 
+func parseTime(strTime string) (time.Time, error) {
+	startTime, err := time.Parse(reportKeyFormat, strTime)
+	if err == nil {
+		return startTime, nil
+	}
+	return time.Parse(time.RFC3339, strTime)
+}
+
 func (t *tool) uploadMetrics() {
 	logger := t.logger.WithField("action", "metrics")
 	logger.Info("starting to upload metrics")
@@ -227,7 +235,7 @@ func (t *tool) uploadMetrics() {
 		logger.Error("could not get metric start time from metric data")
 		return
 	}
-	startTime, err := time.Parse(reportKeyFormat, startTimeStr)
+	startTime, err := parseTime(startTimeStr)
 	if err != nil {
 		logger.WithError(err).Error("could not read metric start time from metric data")
 		return
