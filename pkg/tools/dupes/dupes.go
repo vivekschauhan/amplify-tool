@@ -56,19 +56,17 @@ func NewTool(cfg *Config) Tool {
 		serviceRegistry = service.NewServiceRegistry(logger, apicClient, cfg.DryRun, service.WithGetInstances(), service.WithEnvironments(envs))
 	}
 	assetCatalog := service.NewAssetCatalog(logger, apicClient, cfg.DryRun, serviceRegistry)
-	// productCatalog := service.NewProductCatalog(logger, assetCatalog, apicClient, "", cfg.DryRun)
 	return &tool{
 		logger:          logger,
 		cfg:             cfg,
 		apicClient:      apicClient,
 		serviceRegistry: serviceRegistry,
 		assetCatalog:    assetCatalog,
-		// productCatalog:  productCatalog,
-		actionIndex: 0,
-		output:      []string{},
-		outFile:     cfg.OutFile,
-		backup:      []string{},
-		backupFile:  cfg.BackupFile,
+		actionIndex:     0,
+		output:          []string{},
+		outFile:         cfg.OutFile,
+		backup:          []string{},
+		backupFile:      cfg.BackupFile,
 	}
 }
 
@@ -79,11 +77,7 @@ func (t *tool) Run() error {
 		t.logger.WithError(err).Error("could not read resources: stopping the tool")
 		return err
 	}
-	// err = t.Write()
-	// if err != nil {
-	// 	t.logger.WithError(err).Error("could not write resources: stopping the tool")
-	// 	return err
-	// }
+
 	return t.findDupes()
 }
 
@@ -91,9 +85,7 @@ func (t *tool) Read() error {
 	t.logger.Debug("gathering resources from amplify")
 	t.serviceRegistry.ReadServices()
 	t.assetCatalog.ReadAssets(false)
-	// t.productCatalog.ReadProducts()
 
-	// cycle through all envs
 	return nil
 }
 
@@ -102,15 +94,12 @@ func (t *tool) findDupes() error {
 	envs := t.serviceRegistry.GetEnvs()
 	for _, env := range envs {
 		logger := t.logger.WithField("env", env)
-		grouping := t.groupServicesInEnv(env)
-		logger.WithField("groups", grouping).Debug("finished grouping for env")
+		groupings := t.groupServicesInEnv(env)
+		logger.WithField("groups", groupings).Debug("finished grouping for env")
 
 		// process each grouping
-		for key, group := range grouping {
+		for key, group := range groupings {
 			logger = logger.WithField("groupKey", key)
-			if len(group) <= 1 {
-				continue
-			}
 			logger.WithField("copies", len(group)).Debug("found duplicates")
 			t.handleGroup(logger, env, group)
 		}
@@ -140,8 +129,17 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 
 	itemToAssets := map[string]int{}
 	totalAssets := 0
-	if len(services) <= 1 {
-		return
+
+	if len(services) == 1 {
+		svcInfo := t.serviceRegistry.GetAPIServiceInfo(env, services[0])
+		if len(svcInfo.APIServiceInstances) == 0 {
+			t.output = append(t.output, sep)
+			t.output = append(t.output, "#\tACTION "+actionString+": For the following service no api service instances found, it may be removed nothing to merge and no assets")
+			t.output = append(t.output, sep2)
+			t.output = append(t.output, fmt.Sprintf("axway central delete -s %v apiservice %v", env, services[0]))
+			t.output = append(t.output, sep)
+			return
+		}
 	}
 
 	// loop through all services in groups and count the number of assets
@@ -224,7 +222,7 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 		for _, inst := range svcInfo.APIServiceInstances {
 			hash, err := util.GetAgentDetailsValue(inst, "tempHash")
 			if err != nil {
-				actionOutput += fmt.Sprintf("#\t\t%v no hash found, take care with removing\n", service)
+				actionOutput += fmt.Sprintf("#\t\t%v no spec hash found on the api service for the revision in the instance, \n", service)
 				continue
 			}
 			logger = logger.WithField("hash", hash)
@@ -277,17 +275,23 @@ func (t *tool) groupServicesInEnv(env string) map[string][]string {
 		if v, found := svcDetails["specHashes"]; found {
 			hashes = v.(map[string]interface{})
 		}
+		if len(serviceInfo.APIServiceInstances) == 0 {
+			grouping[serviceInfo.APIService.Metadata.ID] = append(grouping[serviceInfo.APIService.Metadata.ID], service)
+			continue
+		}
 		for _, inst := range serviceInfo.APIServiceInstances {
 			logger = logger.WithField("instance", inst.Name)
 
 			details := util.GetAgentDetailStrings(inst)
 			if groupBy == "" {
 				// use the first service to determine if we will group by api id or primary key
-				if _, found := details[definitions.AttrExternalAPIID]; found {
+				if _, found := details[definitions.AttrExternalAPIPrimaryKey]; found {
 					groupBy = definitions.AttrExternalAPIID
-				} else if _, found := details[definitions.AttrExternalAPIPrimaryKey]; found {
+				}
+				if _, found := details[definitions.AttrExternalAPIPrimaryKey]; found {
 					groupBy = definitions.AttrExternalAPIPrimaryKey
-				} else {
+				}
+				if groupBy == "" {
 					logger.Error("can't determine how to group services")
 					break
 				}
