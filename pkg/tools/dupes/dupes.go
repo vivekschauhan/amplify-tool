@@ -39,6 +39,7 @@ type tool struct {
 	outFile     string
 	backup      []string
 	backupFile  string
+	noIssues    []string
 }
 
 func NewTool(cfg *Config) Tool {
@@ -67,6 +68,7 @@ func NewTool(cfg *Config) Tool {
 		outFile:         cfg.OutFile,
 		backup:          []string{},
 		backupFile:      cfg.BackupFile,
+		noIssues:        []string{},
 	}
 }
 
@@ -105,6 +107,18 @@ func (t *tool) findDupes() error {
 		}
 	}
 
+	// add all services without issues to the end of the output for visibility that they were checked and have no duplicates
+	if len(t.noIssues) > 0 {
+		t.output = append(t.output, sep)
+		t.output = append(t.output, "#\tThe following services were checked and no duplicates found")
+		t.output = append(t.output, sep2)
+		for _, svc := range t.noIssues {
+			t.output = append(t.output, fmt.Sprintf("#\t\t%v", svc))
+		}
+		t.output = append(t.output, sep)
+		t.output = append(t.output, "")
+	}
+
 	output := strings.Join(t.output, "\n")
 	if t.outFile == "" || t.cfg.DryRun {
 		fmt.Print(output)
@@ -136,10 +150,19 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 			t.output = append(t.output, sep)
 			t.output = append(t.output, "#\tACTION "+actionString+": For the following service no api service instances found, it may be removed nothing to merge and no assets")
 			t.output = append(t.output, sep2)
+			t.output = append(t.output, "#\tExecute the following commands to clean this service")
 			t.output = append(t.output, fmt.Sprintf("axway central delete -s %v apiservice %v", env, services[0]))
 			t.output = append(t.output, sep)
+			t.output = append(t.output, "")
+			t.actionIndex++
 			return
 		}
+		t.noIssues = append(t.noIssues, services[0])
+		return
+	}
+
+	if len(services) < 1 {
+		return
 	}
 
 	// loop through all services in groups and count the number of assets
