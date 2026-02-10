@@ -21,6 +21,7 @@ jobs:
     - uses: wangyoucao577/go-release-action@v1
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
+        pre_command: export CGO_ENABLED=0
         goos: linux
         goarch: amd64
         ldflags: -X "github.com/Axway/agent-sdk/pkg/cmd.BuildVersion=${{ github.ref_name }}" -X "github.com/Axway/agent-sdk/pkg/cmd.SDKBuildVersion=v1.1.53" -X "github.com/Axway/agent-sdk/pkg/cmd.BuildAgentName=${{ env.AGENT_NAME }}" -X "github.com/Axway/agent-sdk/pkg/cmd.BuildAgentDescription=${{ env.DESCRIPTION }}"
