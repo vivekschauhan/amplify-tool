@@ -325,7 +325,7 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 				commandOutput += fmt.Sprintf("axway central get -o json -s %v apiservicerevision %v > %v.json\n", env, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
 				commandOutput += fmt.Sprintf("jq '.spec.apiService |= \"%v\"' %v.json > %v-new.json\n", serviceToKeep, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
 				commandOutput += fmt.Sprintf("cp %v-new.json %v-new-bu.json\n", inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
-				for s := range t.subResources {
+				for _, s := range t.subResources {
 					commandOutput += fmt.Sprintf("jq 'del(.%v)' %v-new.json > %v-new.json\n", s, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
 				}
 				commandOutput += fmt.Sprintf("axway central apply -f %v-new.json\n", inst.Spec.ApiServiceRevision)
@@ -370,7 +370,7 @@ func (t *tool) groupServicesInEnv(env string) map[string][]string {
 			details := util.GetAgentDetailStrings(inst)
 			if groupBy == "" {
 				// use the first service to determine if we will group by api id or primary key
-				if _, found := details[definitions.AttrExternalAPIPrimaryKey]; found {
+				if _, found := details[definitions.AttrExternalAPIID]; found {
 					groupBy = definitions.AttrExternalAPIID
 				}
 				if _, found := details[definitions.AttrExternalAPIPrimaryKey]; found {
