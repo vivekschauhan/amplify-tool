@@ -72,20 +72,20 @@ func CreateAPICClient(cfg *Config) (apic.Client, auth.PlatformTokenGetter) {
 	urls := regionalSettingsMap[centralCfg.GetRegion()]
 	if cfg.SingleURL == "" {
 		cfg.SingleURL = urls.SingleURL
+		centralCfg.SingleURL = urls.SingleURL
 	}
 	if cfg.URL == "" {
 		cfg.URL = urls.CentralURL
+		centralCfg.URL = urls.CentralURL
 	}
 	if cfg.PlatformURL == "" {
 		cfg.PlatformURL = urls.PlatformURL
+		centralCfg.PlatformURL = urls.PlatformURL
 	}
-	if cfg.TraceabilityHost != "" {
+	if cfg.TraceabilityHost == "" {
 		// convert to http
 		cfg.TraceabilityHost = strings.Split(urls.TraceabilityHost, ":")[0] + ":443"
 	}
-	centralCfg.SingleURL = cfg.SingleURL
-	centralCfg.URL = cfg.URL
-	centralCfg.PlatformURL = cfg.PlatformURL
 	acfg := centralCfg.GetAuthConfig()
 	authCfg, _ := acfg.(*config.AuthConfiguration)
 	authCfg.ClientID = cfg.Auth.ClientID
