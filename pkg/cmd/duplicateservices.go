@@ -39,6 +39,7 @@ func initDuplicateCmdFlags(cmd *cobra.Command) {
 	cmd.Flags().String("out_file", "", "The name of the file to save to")
 	cmd.Flags().String("backup_file", "", "The name of the file to backup to, not created in dry runs")
 	cmd.Flags().String("environments", "", "The environments to run the deduplication against, comma separated")
+	cmd.Flags().String("subresources", "compliance", "Subresources to strip from API Service Revisions, comma separated. Default: compliance")
 }
 
 func runDeduplicate(_ *cobra.Command, _ []string) error {

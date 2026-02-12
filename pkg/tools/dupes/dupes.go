@@ -33,6 +33,7 @@ type tool struct {
 	logger          *logrus.Logger
 	serviceRegistry service.ServiceRegistry
 	assetCatalog    service.AssetCatalog
+	subResources    []string
 	outFile         string
 	backup          []string
 	backupFile      string
@@ -58,6 +59,15 @@ func NewTool(cfg *Config) Tool {
 		}
 		serviceRegistry = service.NewServiceRegistry(logger, apicClient, cfg.DryRun, service.WithGetInstances(), service.WithEnvironments(envs))
 	}
+	subResources := []string{}
+	if len(cfg.SubResources) > 0 {
+		subs := strings.Split(cfg.SubResources, ",")
+		for i := range subs {
+			if str := strings.Trim(subs[i], " "); str != "" {
+				subResources = append(subResources, str)
+			}
+		}
+	}
 	assetCatalog := service.NewAssetCatalog(logger, apicClient, cfg.DryRun, serviceRegistry)
 	return &tool{
 		logger:          logger,
@@ -65,6 +75,7 @@ func NewTool(cfg *Config) Tool {
 		apicClient:      apicClient,
 		serviceRegistry: serviceRegistry,
 		assetCatalog:    assetCatalog,
+		subResources:    subResources,
 		outFile:         cfg.OutFile,
 		backup:          []string{},
 		backupFile:      cfg.BackupFile,
@@ -168,14 +179,13 @@ func (t *tool) findDupes() error {
 	if len(t.mergeRevisions) > 0 {
 		outputLines = append(outputLines, sep)
 		outputLines = append(outputLines, "#\tThe following services were checked and need to have their revisions merged to the surviving services")
-		outputLines = append(outputLines, "#\t\tOnce merged their API Service Instances may need updates.")
-		outputLines = append(outputLines, sep2)
+		outputLines = append(outputLines, "#\t\tOnce merged their API Service Instances may need updates to point to the latest revision.")
+		outputLines = append(outputLines, sep)
 		for _, action := range t.mergeRevisions {
 			outputLines = append(outputLines, action)
 		}
-		outputLines = append(outputLines, sep)
-		outputLines = append(outputLines, "")
 	}
+	outputLines = append(outputLines, "")
 
 	// add all services without issues to the end of the output for visibility that they were checked and have no duplicates
 	if len(t.noIssues) > 0 {
@@ -314,9 +324,11 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 				actionOutput += fmt.Sprintf("#\t\t%v can be deleted after merging revision %v to %v\n", service, inst.Spec.ApiServiceRevision, serviceToKeep)
 				commandOutput += fmt.Sprintf("axway central get -o json -s %v apiservicerevision %v > %v.json\n", env, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
 				commandOutput += fmt.Sprintf("jq '.spec.apiService |= \"%v\"' %v.json > %v-new.json\n", serviceToKeep, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
-				commandOutput += fmt.Sprintf("jq ''del(.compliance' %v.json > %v-new1.json\n", inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
-				commandOutput += fmt.Sprintf("axway central apply -f %v-new1.json\n", inst.Spec.ApiServiceRevision)
-				commandOutput += fmt.Sprintf("#\tIn environment %v an update to the APIServiceInstance(s) related to %v may be necessary, in order to point to new revision %v", env, service, inst.Spec.ApiServiceRevision)
+				commandOutput += fmt.Sprintf("cp %v-new.json %v-new-bu.json\n", inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
+				for s := range t.subResources {
+					commandOutput += fmt.Sprintf("jq 'del(.%v)' %v-new.json > %v-new.json\n", s, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
+				}
+				commandOutput += fmt.Sprintf("axway central apply -f %v-new.json\n", inst.Spec.ApiServiceRevision)
 			}
 		}
 	}
@@ -324,7 +336,7 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 	// add app actions and commands to merge array
 	if actionOutput != "" {
 		t.mergeRevisions = append(t.mergeRevisions, fmt.Sprintf("%v\n%v", strings.TrimRight(actionOutput, "\n"), sep2))
-		t.mergeRevisions = append(t.mergeRevisions, fmt.Sprintf("%v\n%v\n", strings.TrimRight(commandOutput, "\n"), sep))
+		t.mergeRevisions = append(t.mergeRevisions, fmt.Sprintf("%v\n%v", strings.TrimRight(commandOutput, "\n"), sep))
 	}
 
 	// append backup data to log
