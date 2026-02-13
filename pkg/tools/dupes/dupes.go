@@ -33,12 +33,16 @@ type tool struct {
 	logger          *logrus.Logger
 	serviceRegistry service.ServiceRegistry
 	assetCatalog    service.AssetCatalog
-	// productCatalog  service.ProductCatalog
-	actionIndex int
-	output      []string
-	outFile     string
-	backup      []string
-	backupFile  string
+	subResources    []string
+	outFile         string
+	backup          []string
+	backupFile      string
+	noIssues        []string
+	noAssetsSI      []string
+	noMerge         []string
+	noSpecHash      []string
+	multipleAssets  []string
+	mergeRevisions  []string
 }
 
 func NewTool(cfg *Config) Tool {
@@ -55,20 +59,32 @@ func NewTool(cfg *Config) Tool {
 		}
 		serviceRegistry = service.NewServiceRegistry(logger, apicClient, cfg.DryRun, service.WithGetInstances(), service.WithEnvironments(envs))
 	}
+	subResources := []string{}
+	if len(cfg.SubResources) > 0 {
+		subs := strings.Split(cfg.SubResources, ",")
+		for i := range subs {
+			if str := strings.Trim(subs[i], " "); str != "" {
+				subResources = append(subResources, str)
+			}
+		}
+	}
 	assetCatalog := service.NewAssetCatalog(logger, apicClient, cfg.DryRun, serviceRegistry)
-	// productCatalog := service.NewProductCatalog(logger, assetCatalog, apicClient, "", cfg.DryRun)
 	return &tool{
 		logger:          logger,
 		cfg:             cfg,
 		apicClient:      apicClient,
 		serviceRegistry: serviceRegistry,
 		assetCatalog:    assetCatalog,
-		// productCatalog:  productCatalog,
-		actionIndex: 0,
-		output:      []string{},
-		outFile:     cfg.OutFile,
-		backup:      []string{},
-		backupFile:  cfg.BackupFile,
+		subResources:    subResources,
+		outFile:         cfg.OutFile,
+		backup:          []string{},
+		backupFile:      cfg.BackupFile,
+		noIssues:        []string{},
+		noAssetsSI:      []string{},
+		noMerge:         []string{},
+		noSpecHash:      []string{},
+		multipleAssets:  []string{},
+		mergeRevisions:  []string{},
 	}
 }
 
@@ -79,11 +95,7 @@ func (t *tool) Run() error {
 		t.logger.WithError(err).Error("could not read resources: stopping the tool")
 		return err
 	}
-	// err = t.Write()
-	// if err != nil {
-	// 	t.logger.WithError(err).Error("could not write resources: stopping the tool")
-	// 	return err
-	// }
+
 	return t.findDupes()
 }
 
@@ -91,9 +103,7 @@ func (t *tool) Read() error {
 	t.logger.Debug("gathering resources from amplify")
 	t.serviceRegistry.ReadServices()
 	t.assetCatalog.ReadAssets(false)
-	// t.productCatalog.ReadProducts()
 
-	// cycle through all envs
 	return nil
 }
 
@@ -102,21 +112,94 @@ func (t *tool) findDupes() error {
 	envs := t.serviceRegistry.GetEnvs()
 	for _, env := range envs {
 		logger := t.logger.WithField("env", env)
-		grouping := t.groupServicesInEnv(env)
-		logger.WithField("groups", grouping).Debug("finished grouping for env")
+		groupings := t.groupServicesInEnv(env)
+		logger.WithField("groups", groupings).Debug("finished grouping for env")
 
 		// process each grouping
-		for key, group := range grouping {
+		for key, group := range groupings {
 			logger = logger.WithField("groupKey", key)
-			if len(group) <= 1 {
-				continue
-			}
 			logger.WithField("copies", len(group)).Debug("found duplicates")
 			t.handleGroup(logger, env, group)
 		}
 	}
 
-	output := strings.Join(t.output, "\n")
+	outputLines := []string{}
+	// add all services without assets to the end of the output for visibility that they were checked and have no assets
+	if len(t.noAssetsSI) > 0 {
+		outputLines = append(outputLines, sep)
+		outputLines = append(outputLines, "#\tThe following actions can be taken as no api service instances or assets found for the service")
+		outputLines = append(outputLines, sep2)
+		for _, action := range t.noAssetsSI {
+			outputLines = append(outputLines, action)
+		}
+		outputLines = append(outputLines, sep)
+		outputLines = append(outputLines, "")
+	}
+
+	// add all services that do not need merged as their surviving service has the spec hash they refer to
+	if len(t.noMerge) > 0 {
+		outputLines = append(outputLines, sep)
+		outputLines = append(outputLines, "#\tThe following actions can be taken without merging their api service revisions as the hash")
+		outputLines = append(outputLines, "#\t\texists on the service that was duplicated and as no assets linked to them")
+		outputLines = append(outputLines, sep2)
+		for _, action := range t.noMerge {
+			outputLines = append(outputLines, action)
+		}
+		outputLines = append(outputLines, sep)
+		outputLines = append(outputLines, "")
+	}
+
+	// add all services that have multiple assets linked to them and need more investigation to the end of the output for visibility that they were checked and need more investigation
+	if len(t.multipleAssets) > 0 {
+		outputLines = append(outputLines, sep)
+		outputLines = append(outputLines, "#\tThe following services require more investigation as they have multiple assets linked to them")
+		outputLines = append(outputLines, sep2)
+		for _, action := range t.multipleAssets {
+			outputLines = append(outputLines, action)
+			outputLines = append(outputLines, sep2)
+		}
+		outputLines = append(outputLines, sep)
+		outputLines = append(outputLines, "")
+	}
+
+	// add all services that a spec hash could not be found in the x-agent-details of the service
+	if len(t.noSpecHash) > 0 {
+		outputLines = append(outputLines, sep)
+		outputLines = append(outputLines, "#\tThe following services were checked and require more investigation. No spec hash found for the revision referenced in the instance")
+		outputLines = append(outputLines, "#\t\tThese will need to be investigated and manually merged if they are to be deleted")
+		outputLines = append(outputLines, sep2)
+		for _, svc := range t.noSpecHash {
+			outputLines = append(outputLines, fmt.Sprintf("#\t\t%v", svc))
+		}
+		outputLines = append(outputLines, sep)
+		outputLines = append(outputLines, "")
+	}
+
+	// add all services that need to be merged and have commands to do so to the end of the output for visibility that they were checked and need to be merged
+	if len(t.mergeRevisions) > 0 {
+		outputLines = append(outputLines, sep)
+		outputLines = append(outputLines, "#\tThe following services were checked and need to have their revisions merged to the surviving services")
+		outputLines = append(outputLines, "#\t\tOnce merged their API Service Instances may need updates to point to the latest revision.")
+		outputLines = append(outputLines, sep)
+		for _, action := range t.mergeRevisions {
+			outputLines = append(outputLines, action)
+		}
+	}
+	outputLines = append(outputLines, "")
+
+	// add all services without issues to the end of the output for visibility that they were checked and have no duplicates
+	if len(t.noIssues) > 0 {
+		outputLines = append(outputLines, sep)
+		outputLines = append(outputLines, "#\tThe following services were checked and no duplicates found, no actions needed")
+		outputLines = append(outputLines, sep2)
+		for _, svc := range t.noIssues {
+			outputLines = append(outputLines, fmt.Sprintf("#\t\t%v", svc))
+		}
+		outputLines = append(outputLines, sep)
+		outputLines = append(outputLines, "")
+	}
+
+	output := strings.Join(outputLines, "\n")
 	if t.outFile == "" || t.cfg.DryRun {
 		fmt.Print(output)
 	}
@@ -136,11 +219,21 @@ func (t *tool) findDupes() error {
 
 func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) {
 	sort.Strings(services)
-	actionString := fmt.Sprintf("%04d", t.actionIndex)
 
 	itemToAssets := map[string]int{}
 	totalAssets := 0
-	if len(services) <= 1 {
+
+	if len(services) == 1 {
+		svcInfo := t.serviceRegistry.GetAPIServiceInfo(env, services[0])
+		if len(svcInfo.APIServiceInstances) == 0 {
+			t.noAssetsSI = append(t.noAssetsSI, fmt.Sprintf("axway central delete -s %v apiservice %v", env, services[0]))
+			return
+		}
+		t.noIssues = append(t.noIssues, services[0])
+		return
+	}
+
+	if len(services) < 1 {
 		return
 	}
 
@@ -179,24 +272,19 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 		}
 	}
 
-	t.output = append(t.output, sep)
 	// when greater than 2 output that more care needs to be taken
 	if servicesWithAssets == 2 {
-		t.output = append(t.output, "#\tACTION "+actionString+": For the following services more investigation needed as multiple services have assets")
-		t.actionIndex++
+		multipleAssetsOutput := ""
 		for _, service := range services {
-			t.output = append(t.output, fmt.Sprintf("#\t\t%v has %v assets", service, itemToAssets[service]))
+			multipleAssetsOutput += fmt.Sprintf("#\t\t%v has %v assets\n", service, itemToAssets[service])
 		}
-		t.output = append(t.output, sep)
-		t.output = append(t.output, "")
+		t.multipleAssets = append(t.multipleAssets, multipleAssetsOutput)
 		return
 	}
 
 	// 1 or fewer services with assets
-	t.output = append(t.output, fmt.Sprintf("#\tACTION "+actionString+": For the following services combine all revisions to %s and remove others", serviceToKeep))
 	t.backup = append(t.backup, sep)
-	t.backup = append(t.backup, "#\tACTION "+actionString+": All backups for action")
-	t.actionIndex++
+	t.backup = append(t.backup, "#\tAll backups for "+serviceToKeep)
 
 	logger = logger.WithField("serviceToKeep", serviceToKeep)
 	logger.Info("starting to compare spec hashes")
@@ -224,37 +312,32 @@ func (t *tool) handleGroup(logger *logrus.Entry, env string, services []string) 
 		for _, inst := range svcInfo.APIServiceInstances {
 			hash, err := util.GetAgentDetailsValue(inst, "tempHash")
 			if err != nil {
-				actionOutput += fmt.Sprintf("#\t\t%v no hash found, take care with removing\n", service)
+				t.noSpecHash = append(t.noSpecHash, service)
 				continue
 			}
 			logger = logger.WithField("hash", hash)
 
 			logger.Debug("handling instance hash compare")
 			if _, found := hashes[hash]; found {
-				actionOutput += fmt.Sprintf("#\t\t%v can be deleted without any merge as hash exists on %v and it has %v related assets\n", service, serviceToKeep, itemToAssets[service])
-				commandOutput += fmt.Sprintf("axway central delete -s %v apiservice %v\n", env, service)
+				t.noMerge = append(t.noMerge, fmt.Sprintf("axway central delete -s %v apiservice %v", env, service))
 			} else {
 				actionOutput += fmt.Sprintf("#\t\t%v can be deleted after merging revision %v to %v\n", service, inst.Spec.ApiServiceRevision, serviceToKeep)
 				commandOutput += fmt.Sprintf("axway central get -o json -s %v apiservicerevision %v > %v.json\n", env, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
 				commandOutput += fmt.Sprintf("jq '.spec.apiService |= \"%v\"' %v.json > %v-new.json\n", serviceToKeep, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
+				commandOutput += fmt.Sprintf("cp %v-new.json %v-new-bu.json\n", inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
+				for _, s := range t.subResources {
+					commandOutput += fmt.Sprintf("jq 'del(.%v)' %v-new.json > %v-new.json\n", s, inst.Spec.ApiServiceRevision, inst.Spec.ApiServiceRevision)
+				}
 				commandOutput += fmt.Sprintf("axway central apply -f %v-new.json\n", inst.Spec.ApiServiceRevision)
-				commandOutput += fmt.Sprintf("%v\n", sep2)
-				commandOutput += fmt.Sprintf("#\tIn environment %v an update to the APIServiceInstance(s) related to %v may be necessary, in order to point to new revision %v\n", env, service, inst.Spec.ApiServiceRevision)
-				commandOutput += fmt.Sprintf("%v\n", sep2)
 			}
 		}
 	}
-	// append actionOutput to log
-	actionOutput = strings.TrimRight(actionOutput, "\n")
-	t.output = append(t.output, actionOutput)
-	t.output = append(t.output, sep2)
 
-	// append commandOutput to log
-	commandOutput = strings.TrimRight(commandOutput, "\n")
-	t.output = append(t.output, "#\tExecute the following commands to clean these duplicated services")
-	t.output = append(t.output, commandOutput)
-	t.output = append(t.output, sep)
-	t.output = append(t.output, "")
+	// add app actions and commands to merge array
+	if actionOutput != "" {
+		t.mergeRevisions = append(t.mergeRevisions, fmt.Sprintf("%v\n%v", strings.TrimRight(actionOutput, "\n"), sep2))
+		t.mergeRevisions = append(t.mergeRevisions, fmt.Sprintf("%v\n%v", strings.TrimRight(commandOutput, "\n"), sep))
+	}
 
 	// append backup data to log
 	j, _ := json.Marshal(backups)
@@ -277,6 +360,10 @@ func (t *tool) groupServicesInEnv(env string) map[string][]string {
 		if v, found := svcDetails["specHashes"]; found {
 			hashes = v.(map[string]interface{})
 		}
+		if len(serviceInfo.APIServiceInstances) == 0 {
+			grouping[serviceInfo.APIService.Metadata.ID] = append(grouping[serviceInfo.APIService.Metadata.ID], service)
+			continue
+		}
 		for _, inst := range serviceInfo.APIServiceInstances {
 			logger = logger.WithField("instance", inst.Name)
 
@@ -285,9 +372,11 @@ func (t *tool) groupServicesInEnv(env string) map[string][]string {
 				// use the first service to determine if we will group by api id or primary key
 				if _, found := details[definitions.AttrExternalAPIID]; found {
 					groupBy = definitions.AttrExternalAPIID
-				} else if _, found := details[definitions.AttrExternalAPIPrimaryKey]; found {
+				}
+				if _, found := details[definitions.AttrExternalAPIPrimaryKey]; found {
 					groupBy = definitions.AttrExternalAPIPrimaryKey
-				} else {
+				}
+				if groupBy == "" {
 					logger.Error("can't determine how to group services")
 					break
 				}

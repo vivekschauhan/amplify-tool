@@ -10,4 +10,5 @@ type Config struct {
 	OutFile      string `mapstructure:"out_file"`
 	BackupFile   string `mapstructure:"backup_file"`
 	Environments string `mapstructure:"environments"`
+	SubResources string `mapstructure:"subresources"`
 }
